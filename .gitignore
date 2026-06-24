@@ -1,0 +1,6 @@
+.env
+.venv
+docs
+
+# exceptions
+!doc/docs_AGENT_SPEC.md
