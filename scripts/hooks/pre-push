@@ -1,0 +1,13 @@
+#!/bin/sh
+# Blocks direct pushes to master. All changes must go through a PR.
+
+protected_branch="master"
+current_branch=$(git symbolic-ref HEAD 2>/dev/null | sed 's|refs/heads/||')
+
+if [ "$current_branch" = "$protected_branch" ]; then
+  echo ""
+  echo "  Direct push to '$protected_branch' is not allowed."
+  echo "  Create a branch and open a Pull Request instead."
+  echo ""
+  exit 1
+fi
