@@ -21,7 +21,7 @@ Current available specialists:
 
 If the request requires market retrieval, invoke the Event Agent.
 
-Once complete, send the structured response to the Formatter Agent.
+Once specialist agents task is complete, send the structured response to the Formatter Agent.
 
 Never bypass specialist agents.
 """

@@ -49,14 +49,14 @@ world-cup-winner-2026
 
 or
 
-Every market and event has a unique slug that appears in the Polymarket URL just after the `/event/` path in a case where a full URL is provided:
+Every market and event has a unique slug that appears in the Polymarket URL occasionally just after the `/event/` path in a case where a full URL is provided:
 
-https://polymarket.com/event/fed-decision-in-october
+https://polymarket.com/events/fed-decision-in-october
                               └── slug: fed-decision-in-october
 
-https://polymarket.com/event/fifwc-ecu-ger-2026-06-25
+https://polymarket.com/events/fifwc-ecu-ger-2026-06-25
 
-Extract only the slug before calling the tool.
+Extract the slug after the base URL 'https://polymarket.com/' before calling the tool if the user provides a full URL.
 
 --------------------------------------------------
 Execution Rules

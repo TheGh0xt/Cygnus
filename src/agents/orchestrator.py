@@ -3,8 +3,8 @@
 
 from google.adk.agents.llm_agent import LlmAgent
 
-from src.agents import events, formatter
-from src.prompts.orchestrator import SYSTEM_PROMPT
+from ..prompts.orchestrator import SYSTEM_PROMPT
+from . import events, formatter
 
 orchestrator = LlmAgent(
     model="gemini-2.5-flash",
