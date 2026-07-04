@@ -26,3 +26,11 @@ def test_root_agent_is_exposed_for_adk_discovery():
         assert pkg.root_agent.name == "polymarket_orchestrator"
     finally:
         sys.path.remove(parent)
+
+
+def test_signal_agent_registered():
+    from src.agents.signals import market_signal_agent
+
+    names = [a.name for a in orchestrator.sub_agents]
+    assert "market_signal_agent" in names
+    assert market_signal_agent.output_key == "market_signals_output"
