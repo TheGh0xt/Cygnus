@@ -30,6 +30,13 @@ adk run Cygnus
 
 # Run with a local .env file loaded
 adk run --env_file .env Cygnus
+
+# Install dev dependencies and run tests (from the repo root)
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/ -v
+
+# Run the T+48h evaluation worker (needs Sagittarius running)
+.venv/bin/python -m src.evaluation.worker --db pmie_memory.db
 ```
 
 The `.adk/session.db` file stores conversation state for the dev UI — it is gitignored.
@@ -45,24 +52,34 @@ The `.adk/session.db` file stores conversation state for the dev UI — it is gi
 ```
 orchestrator  (polymarket_orchestrator)
 ├── market_event_agent    — retrieves a single Polymarket event via Sagittarius MCP tools
+├── market_signal_agent   — retrieves deterministic signals (whale activity, market snapshot) via Sagittarius
+├── market_analyst_agent  — pure reasoning: synthesizes a MarketAnalysisReport from the two outputs above
 └── formatter_agent       — formats structured output for readability only
 ```
 
-Each agent is defined in `src/agents/` and its system prompt lives in the corresponding file under `src/prompts/`.
+Each agent is defined in `src/agents/` and its system prompt lives in the corresponding file under `src/prompts/`. The event and signal agents write to session state (`event_details_output`, `market_signals_output`); the analyst reads both via prompt placeholders and emits `market_analysis_report` validated against `src/schemas/report.py` (`output_schema=MarketAnalysisReport` — which is why it has no tools; ADK forbids tools with an output schema).
 
 ### Agent Design Rules (enforced in prompts)
 
 - The orchestrator never performs analysis or summarizes data itself — it only routes.
-- The event agent retrieves one event and returns the raw tool result; it never speculates or analyzes.
+- The event and signal agents retrieve data and return raw tool results; they never speculate or analyze.
+- The analyst reasons ONLY over injected state, cites concrete numbers as evidence, and caps confidence at 0.9.
 - The formatter presents data only; it never changes numeric values or infers missing fields.
+
+### Layers 3 & 5 (in this repo)
+
+- `src/memory/` — **Layer 3 MVP**: `SqliteMemoryStore` persists `MarketAnalysisReport`s with the price observed at report time (`schema.sql` is kept portable for the planned pgvector store; vector search deferred). All writes happen in Cygnus — Sagittarius never touches this store.
+- `src/evaluation/` — **Layer 5**: `run_evaluation_cycle` backtests due reports (default T+48h) with the deterministic matrix in `evaluate_report`: price held/extended → CONFIRMED (+0.05 confidence, cap 1.0); reversed beyond a 0.02 tolerance → REVERSED (−0.10, floor 0.0). Unfetchable markets stay due for the next cycle. CLI: `python -m src.evaluation.worker --db <path>`.
 
 ### Sagittarius MCP Connection
 
 `market_event_agent` connects to the Sagittarius MCP server via StreamableHTTP. The URL is read from the `SAGITTARIUS_MCP_URL` environment variable (default: `http://localhost:8080/mcp`). Sagittarius must be running before invoking the event agent.
 
 Available MCP tools (exposed by Sagittarius):
-- `get_event_by_id` — fetch by numeric Polymarket event ID
-- `get_event_by_slug` — fetch by slug or extracted from a Polymarket URL
+- `get_event_by_id` — fetch by numeric Polymarket event ID (event agent)
+- `get_event_by_slug` — fetch by slug or extracted from a Polymarket URL (event agent)
+- `get_market_snapshot` — per-market probability, orderbook skew, volume-spike analysis, whale count (signal agent)
+- `get_whale_activity` — whale-sized trades per market with buy/sell ratio (signal agent)
 
 ## Key Constraints
 

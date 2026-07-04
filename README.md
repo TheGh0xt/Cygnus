@@ -80,11 +80,13 @@ As the Memory Layer (Layer 3), Signal Engine (Layer 2), and Evaluation Engine (L
 
 ## Agent Architecture
 
-Cygnus is currently a **sequential** orchestration of three ADK `LlmAgent`s (all on `gemini-2.5-flash`):
+Cygnus is currently a **sequential** orchestration of five ADK `LlmAgent`s (all on `gemini-2.5-flash`):
 
 ```
 orchestrator  (polymarket_orchestrator)
 ├── market_event_agent    — retrieves a single Polymarket event via Sagittarius MCP tools
+├── market_signal_agent   — retrieves deterministic signals (whale activity, market snapshot)
+├── market_analyst_agent  — synthesizes a schema-validated MarketAnalysisReport
 └── formatter_agent       — formats structured output for readability only
 ```
 
@@ -92,6 +94,8 @@ orchestrator  (polymarket_orchestrator)
 |---|---|---|---|
 | `orchestrator` | `src/agents/orchestrator.py` | `src/prompts/orchestrator.py` | Understands user intent and delegates to the correct specialist. Never analyzes or summarizes data itself. |
 | `market_event_agent` | `src/agents/events.py` | `src/prompts/events.py` | Chooses between the `get_event_by_id` and `get_event_by_slug` MCP tools, retrieves exactly one event, and returns the raw tool result untouched. |
+| `market_signal_agent` | `src/agents/signals.py` | `src/prompts/signals.py` | Calls `get_market_snapshot` (default) and `get_whale_activity` (whale-specific requests) for an event slug; returns tool results untouched. |
+| `market_analyst_agent` | `src/agents/analyst.py` | `src/prompts/analyst.py` | Pure reasoning over the event + signal outputs in session state; emits a `MarketAnalysisReport` enforced via ADK `output_schema` (no tools allowed). |
 | `formatter_agent` | `src/agents/formatter.py` | `src/prompts/formatter.py` | Presents the retrieved data in a clean, readable report. Never fabricates, infers, or alters values. |
 
 > **Note:** The orchestrator currently uses ADK's sequential sub-agent model rather than a graph/workflow agent. There's a `TODO` in `src/agents/orchestrator.py` to migrate to a graph-based workflow as routing complexity grows (e.g. once the Memory Layer and Signal Engine are wired in).
@@ -125,9 +129,27 @@ These constraints are enforced directly in each agent's system prompt (not just 
 - **Raw trade/order-book data must never reach the LLM directly.** Aggregation is the Memory Layer's job (Layer 3) — Cygnus only ever reasons over pre-processed, semantically dense context once that layer exists.
 - **`master` is protected.** All changes go through pull requests — enforced locally by the `pre-push` git hook in `scripts/hooks/pre-push`.
 
+## Layers 3 & 5: Memory Store and Evaluation Worker
+
+- **`src/memory/`** — Layer 3 MVP: `SqliteMemoryStore` persists every `MarketAnalysisReport` together with the market price observed at report time. SQLite keeps the MVP infrastructure-free; `schema.sql` stays portable for the planned pgvector-backed store, and vector search is deliberately deferred until historical-parallel matching lands. All writes happen in Cygnus — the MCP boundary to Sagittarius remains the only cross-repo seam.
+- **`src/evaluation/`** — Layer 5: the T+48h backtesting worker. `evaluate_report` implements the deterministic verification matrix (price held or extended → `CONFIRMED`, confidence +0.05 capped at 1.0; reversed beyond a 0.02 tolerance → `REVERSED`, confidence −0.10 floored at 0.0), and `run_evaluation_cycle` applies it to every due report, skipping markets whose current price can't be fetched. Run it on a cron cadence with:
+
+```bash
+.venv/bin/python -m src.evaluation.worker --db pmie_memory.db
+```
+
+## Testing
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/ -v
+```
+
+Tests never call Gemini or the network — they validate agent wiring invariants, the output contract, the memory store, and the evaluation matrix.
+
 ## Output Contract
 
-Once the full reasoning pipeline (Layers 2–5) is wired in, Cygnus's final output must conform to the `MarketAnalysisReport` JSON schema defined in [`docs/docs_AGENT_SPEC.md`](./docs/docs_AGENT_SPEC.md). At a glance:
+Cygnus's analyst agent emits output conforming to the `MarketAnalysisReport` JSON schema defined in [`docs/docs_AGENT_SPEC.md`](./docs/docs_AGENT_SPEC.md), enforced at runtime via ADK's `output_schema` and defined in `src/schemas/report.py`. At a glance:
 
 ```json
 {
