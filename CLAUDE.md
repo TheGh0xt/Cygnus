@@ -6,12 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Cygnus is **Layer 4 (Reasoning Agent)** of the Prediction Market Intelligence Engine (PMIE) — a multi-layer system that explains *why* prices move on Polymarket prediction markets. Cygnus is built on Google's Agent Development Kit (ADK) and orchestrates specialist agents powered by Gemini.
 
-The full 5-layer architecture:
-- **Layer 1 — Sagittarius** (separate repo): Go/Rust MCP server exposing Polymarket data tools
-- **Layer 2 — Signal Engine** (separate repo): deterministic anomaly detection, no LLM
-- **Layer 3 — Memory Layer** (planned): vector/KV store for token optimization
+The 5 layers map onto exactly **two repos**, split by runtime and synchronous coupling — do not create new repos for Layers 2, 3, or 5:
+
+- **Layer 1 — Sagittarius** (Sagittarius repo, Go): MCP server exposing Polymarket data tools
+- **Layer 2 — Signal Engine** (Sagittarius repo, Go): deterministic anomaly detection, no LLM; in-process with Layer 1 (hot path — never behind an MCP hop), exposing scored signals as additional MCP tools
+- **Layer 3 — Memory Layer** (this repo, planned): vector/KV store for token optimization; Layer 4 needs its semantic context on essentially every reasoning call, and their schemas evolve in lockstep
 - **Layer 4 — Cygnus** (this repo): ADK-based reasoning agent orchestration
-- **Layer 5 — Evaluation Engine** (planned): T+48h accuracy backtesting cron worker
+- **Layer 5 — Evaluation Engine** (this repo, planned): T+48h accuracy backtesting as a cron-style subpackage reading the Memory Layer's store; split into its own deployable only when it needs independent scaling or release cadence
+
+The MCP connection to Sagittarius is the **only** cross-repo seam. All Memory Layer writes happen in this repo — Cygnus fetches scored signals over MCP and stores them itself; Sagittarius never writes to the memory store directly.
 
 ## Development Commands
 
