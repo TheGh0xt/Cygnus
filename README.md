@@ -80,14 +80,17 @@ As the Memory Layer (Layer 3), Signal Engine (Layer 2), and Evaluation Engine (L
 
 ## Agent Architecture
 
-Cygnus is currently a **sequential** orchestration of five ADK `LlmAgent`s (all on `gemini-2.5-flash`):
+Cygnus routes requests through an LLM orchestrator, but the causal-analysis flow itself is a **deterministic `SequentialAgent` pipeline** — every stage always runs, in order (all LLM agents on `gemini-2.5-flash`):
 
 ```
-orchestrator  (polymarket_orchestrator)
-├── market_event_agent    — retrieves a single Polymarket event via Sagittarius MCP tools
-├── market_signal_agent   — retrieves deterministic signals (whale activity, market snapshot)
-├── market_analyst_agent  — synthesizes a schema-validated MarketAnalysisReport
-└── formatter_agent       — formats structured output for readability only
+orchestrator  (polymarket_orchestrator — routes by intent)
+├── market_event_agent         — plain event retrieval via Sagittarius MCP tools
+├── market_signal_agent        — plain signal retrieval (whale activity, market snapshot)
+├── market_analysis_pipeline   (SequentialAgent)
+│   ├── analysis_event_retrieval   — event intelligence stage
+│   ├── analysis_signal_retrieval  — deterministic signals stage
+│   └── market_analyst_agent       — synthesizes a schema-validated MarketAnalysisReport
+└── formatter_agent            — formats structured output for readability only
 ```
 
 | Agent | File | Prompt | Responsibility |

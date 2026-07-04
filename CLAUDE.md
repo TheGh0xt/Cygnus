@@ -47,17 +47,26 @@ The `.adk/session.db` file stores conversation state for the dev UI — it is gi
 
 `agent.py` at the repo root exposes `root_agent = orchestrator`, which ADK discovers automatically because `__init__.py` imports it. This is the required ADK package convention.
 
-### Agent Hierarchy (Sequential, not graph — see TODO in orchestrator.py)
+### Agent Hierarchy
 
 ```
-orchestrator  (polymarket_orchestrator)
-├── market_event_agent    — retrieves a single Polymarket event via Sagittarius MCP tools
-├── market_signal_agent   — retrieves deterministic signals (whale activity, market snapshot) via Sagittarius
-├── market_analyst_agent  — pure reasoning: synthesizes a MarketAnalysisReport from the two outputs above
-└── formatter_agent       — formats structured output for readability only
+orchestrator  (polymarket_orchestrator, LlmAgent — routes by intent)
+├── market_event_agent         — plain event retrieval via Sagittarius MCP tools
+├── market_signal_agent        — plain signal retrieval (whale activity, market snapshot)
+├── market_analysis_pipeline   (SequentialAgent — deterministic causal-analysis flow)
+│   ├── analysis_event_retrieval   — event retrieval stage (fresh instance from make_market_event_agent)
+│   ├── analysis_signal_retrieval  — signal retrieval stage (fresh instance from make_market_signal_agent)
+│   └── market_analyst_agent       — pure reasoning: synthesizes the MarketAnalysisReport
+└── formatter_agent            — formats structured output for readability only
 ```
 
-Each agent is defined in `src/agents/` and its system prompt lives in the corresponding file under `src/prompts/`. The event and signal agents write to session state (`event_details_output`, `market_signals_output`); the analyst reads both via prompt placeholders and emits `market_analysis_report` validated against `src/schemas/report.py` (`output_schema=MarketAnalysisReport` — which is why it has no tools; ADK forbids tools with an output schema).
+Each agent is defined in `src/agents/` and its system prompt lives in the corresponding file under `src/prompts/`. "WHY did this move" requests route to `market_analysis_pipeline`, which runs its three stages **deterministically in sequence** — LLM-driven transfers proved unreliable at visiting every stage (the event agent would transfer straight to the analyst without retrieving). The retrieval stages write session state (`event_details_output`, `market_signals_output`); the analyst reads both via prompt placeholders and emits `market_analysis_report` validated against `src/schemas/report.py`.
+
+Two ADK constraints to know when touching the analyst:
+- `output_schema` forbids tools — the analyst is a pure reasoning step.
+- `output_schema` puts Gemini in JSON response mode, which cannot coexist with the `transfer_to_agent` function declarations ADK attaches to sub-agents — hence `disallow_transfer_to_parent/peers=True` (otherwise Gemini 400s: "Function calling with a response mime type: 'application/json' is unsupported").
+
+Because ADK requires unique agent names and one parent per instance, `events.py` and `signals.py` expose `make_market_event_agent(name)` / `make_market_signal_agent(name)` factories; the pipeline builds its own copies under `analysis_*` names.
 
 ### Agent Design Rules (enforced in prompts)
 
