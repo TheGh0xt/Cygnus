@@ -4,7 +4,7 @@
 from google.adk.agents.llm_agent import LlmAgent
 
 from ..prompts.orchestrator import SYSTEM_PROMPT
-from . import events, formatter, signals
+from . import analyst, events, formatter, signals
 
 orchestrator = LlmAgent(
     model="gemini-2.5-flash",
@@ -14,6 +14,7 @@ orchestrator = LlmAgent(
     sub_agents=[
         events.market_event_agent,
         signals.market_signal_agent,
+        analyst.market_analyst_agent,
         formatter.formatter_agent,
     ],
 )

@@ -34,3 +34,13 @@ def test_signal_agent_registered():
     names = [a.name for a in orchestrator.sub_agents]
     assert "market_signal_agent" in names
     assert market_signal_agent.output_key == "market_signals_output"
+
+
+def test_analyst_agent_enforces_output_contract():
+    from src.agents.analyst import market_analyst_agent
+    from src.schemas.report import MarketAnalysisReport
+
+    assert market_analyst_agent.output_schema is MarketAnalysisReport
+    assert market_analyst_agent.output_key == "market_analysis_report"
+    assert not market_analyst_agent.tools
+    assert "market_analyst_agent" in [a.name for a in orchestrator.sub_agents]
