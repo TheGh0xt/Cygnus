@@ -2,7 +2,7 @@
 .venv
 .adk
 __pycache__
-docs
 
-# exceptions
-!doc/docs_AGENT_SPEC.md
+# docs are local-only, except the tracked canonical spec
+docs/*
+!docs/docs_AGENT_SPEC.md
