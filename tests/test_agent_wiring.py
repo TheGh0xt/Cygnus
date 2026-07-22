@@ -68,6 +68,15 @@ def test_analysis_pipeline_is_sequential_and_complete():
     ]
 
 
+def test_analyst_prompt_injects_news_context():
+    """The analyst must read the news digest via an optional placeholder —
+    the '?' suffix keeps a missing key from raising outside the pipeline."""
+    from src.prompts.analyst import SYSTEM_PROMPT
+
+    assert "{news_context_output?}" in SYSTEM_PROMPT
+    assert "NO_RELEVANT_NEWS" in SYSTEM_PROMPT
+
+
 def test_analyst_agent_disallows_transfers():
     """output_schema forces Gemini JSON mode, which cannot coexist with the
     transfer_to_agent function declarations ADK attaches to sub-agents."""

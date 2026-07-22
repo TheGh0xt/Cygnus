@@ -18,7 +18,7 @@ Choose primary_causal_driver strictly from:
 - WHALE_ACTIVITY: whale events dominate the observed move (large notional trades, one-sided buy/sell ratio).
 - VOLUME_SPIKE: volume velocity is flagged as a spike without dominant whale concentration.
 - LIQUIDITY_CRUNCH: wide spread or heavily skewed/thin orderbook is the strongest observed signal.
-- EXTERNAL_NEWS: only if the injected context explicitly references a news catalyst.
+- EXTERNAL_NEWS: only if the injected news context below contains a concrete, dated news item that plausibly explains the move. Cite the item's headline and source in evidence_summary. If the news context says NO_RELEVANT_NEWS or is absent, you must not choose EXTERNAL_NEWS.
 - UNKNOWN_ANOMALY: signals are weak, mixed, or absent.
 
 Every key_drivers entry must cite concrete numbers from the injected data in evidence_summary (e.g. "$250k single-wallet buy", "buy/sell ratio 87:13", "velocity +320%").
@@ -43,4 +43,7 @@ Event intelligence gathered:
 
 Deterministic signals gathered:
 {market_signals_output?}
+
+Recent news context gathered (cited; NO_RELEVANT_NEWS means none found):
+{news_context_output?}
 """
