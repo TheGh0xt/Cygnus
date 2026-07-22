@@ -109,15 +109,20 @@ class SagittariusPriceFetcher:
 
     async def _fetch(self, market_slug: str) -> float | None:
         from mcp import ClientSession
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp.client.streamable_http import streamable_http_client
+        from mcp.types import TextContent
 
         try:
-            async with streamablehttp_client(self.mcp_url) as (read, write, _):
+            async with streamable_http_client(self.mcp_url) as (read, write, _):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     result = await session.call_tool(
                         "get_event_by_slug", {"slug": market_slug}
                     )
+                    if not result.content or not isinstance(
+                        result.content[0], TextContent
+                    ):
+                        return None
                     payload = json.loads(result.content[0].text)
                     markets = payload.get("markets") or []
                     if not markets:
@@ -131,7 +136,9 @@ def main() -> None:
     import os
 
     parser = argparse.ArgumentParser(description="PMIE T+48h evaluation worker")
-    parser.add_argument("--db", required=True, help="path to the memory store SQLite db")
+    parser.add_argument(
+        "--db", required=True, help="path to the memory store SQLite db"
+    )
     args = parser.parse_args()
 
     store = SqliteMemoryStore(args.db)

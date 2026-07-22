@@ -2,6 +2,7 @@
 .venv
 .adk
 __pycache__
+*.db
 
 # docs are local-only, except the tracked canonical spec
 docs/*
