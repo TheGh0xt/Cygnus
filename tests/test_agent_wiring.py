@@ -68,6 +68,11 @@ def test_analysis_pipeline_is_sequential_and_complete():
     ]
 
 
+def test_news_agent_registered_on_orchestrator():
+    names = [a.name for a in orchestrator.sub_agents]
+    assert "news_context_agent" in names
+
+
 def test_analyst_prompt_injects_news_context():
     """The analyst must read the news digest via an optional placeholder —
     the '?' suffix keeps a missing key from raising outside the pipeline."""

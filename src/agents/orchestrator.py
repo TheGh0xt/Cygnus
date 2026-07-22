@@ -34,6 +34,7 @@ orchestrator = LlmAgent(
     sub_agents=[
         events.market_event_agent,
         signals.market_signal_agent,
+        news.news_context_agent,
         market_analysis_pipeline,
         formatter.formatter_agent,
     ],
