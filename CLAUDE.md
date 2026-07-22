@@ -53,20 +53,23 @@ The `.adk/session.db` file stores conversation state for the dev UI — it is gi
 orchestrator  (polymarket_orchestrator, LlmAgent — routes by intent)
 ├── market_event_agent         — plain event retrieval via Sagittarius MCP tools
 ├── market_signal_agent        — plain signal retrieval (whale activity, market snapshot)
+├── news_context_agent         — plain news retrieval via Google Search grounding
 ├── market_analysis_pipeline   (SequentialAgent — deterministic causal-analysis flow)
 │   ├── analysis_event_retrieval   — event retrieval stage (fresh instance from make_market_event_agent)
 │   ├── analysis_signal_retrieval  — signal retrieval stage (fresh instance from make_market_signal_agent)
+│   ├── analysis_news_retrieval    — news retrieval stage (fresh instance from make_news_context_agent)
 │   └── market_analyst_agent       — pure reasoning: synthesizes the MarketAnalysisReport
 └── formatter_agent            — formats structured output for readability only
 ```
 
-Each agent is defined in `src/agents/` and its system prompt lives in the corresponding file under `src/prompts/`. "WHY did this move" requests route to `market_analysis_pipeline`, which runs its three stages **deterministically in sequence** — LLM-driven transfers proved unreliable at visiting every stage (the event agent would transfer straight to the analyst without retrieving). The retrieval stages write session state (`event_details_output`, `market_signals_output`); the analyst reads both via prompt placeholders and emits `market_analysis_report` validated against `src/schemas/report.py`.
+Each agent is defined in `src/agents/` and its system prompt lives in the corresponding file under `src/prompts/`. "WHY did this move" requests route to `market_analysis_pipeline`, which runs its four stages **deterministically in sequence** — LLM-driven transfers proved unreliable at visiting every stage (the event agent would transfer straight to the analyst without retrieving). The retrieval stages write session state (`event_details_output`, `market_signals_output`, `news_context_output`); the analyst reads them via prompt placeholders and emits `market_analysis_report` validated against `src/schemas/report.py`.
 
-Two ADK constraints to know when touching the analyst:
+Three ADK constraints to know when touching the pipeline:
 - `output_schema` forbids tools — the analyst is a pure reasoning step.
 - `output_schema` puts Gemini in JSON response mode, which cannot coexist with the `transfer_to_agent` function declarations ADK attaches to sub-agents — hence `disallow_transfer_to_parent/peers=True` (otherwise Gemini 400s: "Function calling with a response mime type: 'application/json' is unsupported").
+- The built-in `google_search` tool must be an agent's only tool — Gemini rejects mixing built-in tools with function tools (MCP toolsets), which is why news retrieval is a dedicated pipeline stage rather than a tool on the event agent.
 
-Because ADK requires unique agent names and one parent per instance, `events.py` and `signals.py` expose `make_market_event_agent(name)` / `make_market_signal_agent(name)` factories; the pipeline builds its own copies under `analysis_*` names.
+Because ADK requires unique agent names and one parent per instance, `events.py`, `signals.py`, and `news.py` expose `make_market_event_agent(name)` / `make_market_signal_agent(name)` / `make_news_context_agent(name)` factories; the pipeline builds its own copies under `analysis_*` names.
 
 ### Agent Design Rules (enforced in prompts)
 
@@ -74,6 +77,8 @@ Because ADK requires unique agent names and one parent per instance, `events.py`
 - The event and signal agents retrieve data and return raw tool results; they never speculate or analyze.
 - The analyst reasons ONLY over injected state, cites concrete numbers as evidence, and caps confidence at 0.9.
 - The formatter presents data only; it never changes numeric values or infers missing fields.
+- The news agent retrieves and condenses cited items only (≤5 items, ≤250 words, `NO_RELEVANT_NEWS` sentinel); it never speculates on price impact.
+- The analyst may select EXTERNAL_NEWS only when the injected news digest contains a concrete, dated item, and must cite headline + source in the evidence.
 
 ### Layers 3 & 5 (in this repo)
 
