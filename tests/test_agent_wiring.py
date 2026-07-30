@@ -47,7 +47,8 @@ def test_analyst_agent_enforces_output_contract():
 
 def test_analysis_pipeline_is_sequential_and_complete():
     """Causal analysis must run every stage deterministically: event
-    retrieval, then signal retrieval, then the schema-enforced analyst."""
+    retrieval, signal retrieval, news retrieval, then the schema-enforced
+    analyst."""
     from src.agents.orchestrator import market_analysis_pipeline
 
     assert "market_analysis_pipeline" in [a.name for a in orchestrator.sub_agents]
@@ -55,14 +56,30 @@ def test_analysis_pipeline_is_sequential_and_complete():
     assert stages == [
         "analysis_event_retrieval",
         "analysis_signal_retrieval",
+        "analysis_news_retrieval",
         "market_analyst_agent",
     ]
     keys = [a.output_key for a in market_analysis_pipeline.sub_agents]
     assert keys == [
         "event_details_output",
         "market_signals_output",
+        "news_context_output",
         "market_analysis_report",
     ]
+
+
+def test_news_agent_registered_on_orchestrator():
+    names = [a.name for a in orchestrator.sub_agents]
+    assert "news_context_agent" in names
+
+
+def test_analyst_prompt_injects_news_context():
+    """The analyst must read the news digest via an optional placeholder —
+    the '?' suffix keeps a missing key from raising outside the pipeline."""
+    from src.prompts.analyst import SYSTEM_PROMPT
+
+    assert "{news_context_output?}" in SYSTEM_PROMPT
+    assert "NO_RELEVANT_NEWS" in SYSTEM_PROMPT
 
 
 def test_analyst_agent_disallows_transfers():
