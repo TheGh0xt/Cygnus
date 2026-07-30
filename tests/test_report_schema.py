@@ -45,6 +45,14 @@ def test_missing_required_field_rejected():
         MarketAnalysisReport.model_validate(incomplete)
 
 
+def test_model_dump_is_json_safe():
+    """ADK writes model_dump() output straight into session state, which is then
+    JSON-serialized — a raw datetime there blows up the session service."""
+    dumped = MarketAnalysisReport.model_validate(VALID).model_dump(exclude_none=True)
+    assert dumped["timestamp"] == "2026-07-04T12:00:00+00:00"
+    json.dumps(dumped)
+
+
 def test_json_round_trip():
     report = MarketAnalysisReport.model_validate(VALID)
     again = MarketAnalysisReport.model_validate(json.loads(report.model_dump_json()))

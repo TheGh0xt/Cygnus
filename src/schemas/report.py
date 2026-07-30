@@ -8,7 +8,7 @@ shape being stable and type-checked.
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 
 class CausalDriver(str, Enum):
@@ -44,3 +44,14 @@ class MarketAnalysisReport(BaseModel):
     confidence_score: float = Field(ge=0.0, le=1.0)
     key_drivers: list[KeyDriver]
     historical_context_match: HistoricalContextMatch | None = None
+
+    @field_serializer("timestamp")
+    def _serialize_timestamp(self, value: datetime) -> str:
+        """Keep `model_dump()` JSON-safe in python mode too.
+
+        ADK validates the analyst's reply and writes `model_dump()` straight
+        into session state, which the session service then JSON-serializes —
+        a raw datetime there raises "Object of type datetime is not JSON
+        serializable". Validation on input still enforces a real timestamp.
+        """
+        return value.isoformat()
