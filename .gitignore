@@ -3,6 +3,7 @@
 .adk
 __pycache__
 *.db
+src/web
 
 # docs are local-only, except the tracked canonical spec
 docs/*

@@ -1,10 +1,12 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from mcp.types import AudioContent, CallToolResult, TextContent
 
 from src.evaluation.worker import (
     CONFIDENCE_DECREMENT,
     CONFIDENCE_INCREMENT,
+    _extract_probability_from_tool_result,
     evaluate_report,
     run_evaluation_cycle,
 )
@@ -63,6 +65,37 @@ class TestEvaluateReport:
     def test_confidence_floors_at_zero(self):
         result = evaluate_report(make_report(0.05), price_at_report=0.58, current_price=0.40)
         assert result.new_confidence == 0.0
+
+
+class TestExtractProbabilityFromToolResult:
+    def test_extracts_probability_from_text_content(self):
+        result = CallToolResult(
+            content=[TextContent(type="text", text='{"markets": [{"probability": 0.61}]}')]
+        )
+
+        assert _extract_probability_from_tool_result(result) == 0.61
+
+    def test_skips_non_text_content(self):
+        result = CallToolResult(
+            content=[
+                AudioContent(type="audio", data="", mimeType="audio/wav"),
+                TextContent(type="text", text='{"markets": [{"probability": 0.61}]}'),
+            ]
+        )
+
+        assert _extract_probability_from_tool_result(result) == 0.61
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            CallToolResult(content=[], isError=True),
+            CallToolResult(content=[]),
+            CallToolResult(content=[TextContent(type="text", text="not JSON")]),
+            CallToolResult(content=[TextContent(type="text", text='{"markets": []}')]),
+        ],
+    )
+    def test_rejects_invalid_or_unusable_results(self, result):
+        assert _extract_probability_from_tool_result(result) is None
 
 
 class FakeFetcher:
