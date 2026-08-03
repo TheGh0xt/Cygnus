@@ -25,6 +25,43 @@ CONFIDENCE_DECREMENT = 0.10
 REVERSAL_TOLERANCE = 0.02  # price band within which a move counts as held
 
 
+def _extract_probability_from_tool_result(result: object) -> float | None:
+    """Return the first market probability from a successful text MCP result."""
+    from mcp.types import CallToolResult, TextContent
+
+    if not isinstance(result, CallToolResult) or result.isError:
+        return None
+
+    text_block = next(
+        (block for block in result.content if isinstance(block, TextContent)), None
+    )
+    if text_block is None:
+        return None
+
+    try:
+        payload = json.loads(text_block.text)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    markets = payload.get("markets")
+    if not isinstance(markets, list) or not markets:
+        return None
+
+    first_market = markets[0]
+    if not isinstance(first_market, dict):
+        return None
+
+    probability = first_market.get("probability")
+    return (
+        float(probability)
+        if isinstance(probability, int | float) and not isinstance(probability, bool)
+        else None
+    )
+
+
 @dataclass
 class EvalResult:
     outcome: str  # "CONFIRMED" | "REVERSED"
@@ -110,24 +147,17 @@ class SagittariusPriceFetcher:
     async def _fetch(self, market_slug: str) -> float | None:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
-        from mcp.types import TextContent
 
         try:
-            async with streamable_http_client(self.mcp_url) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.call_tool(
-                        "get_event_by_slug", {"slug": market_slug}
-                    )
-                    if not result.content or not isinstance(
-                        result.content[0], TextContent
-                    ):
-                        return None
-                    payload = json.loads(result.content[0].text)
-                    markets = payload.get("markets") or []
-                    if not markets:
-                        return None
-                    return markets[0].get("probability")
+            async with (
+                streamable_http_client(self.mcp_url) as (read, write, _),
+                ClientSession(read, write) as session,
+            ):
+                await session.initialize()
+                result = await session.call_tool(
+                    "get_event_by_slug", {"slug": market_slug}
+                )
+                return _extract_probability_from_tool_result(result)
         except Exception:
             return None
 
