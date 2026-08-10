@@ -19,3 +19,18 @@ market_analyst_agent = LlmAgent(
     disallow_transfer_to_parent=True,
     disallow_transfer_to_peers=True,
 )
+
+
+def attach_persistence(store, price_fetcher) -> None:
+    """Install the memory-store callback on the analyst.
+
+    Called once at API startup rather than at import time, so tests and the
+    `adk web` dev flow can import this module without a database. Note this
+    mutates a module-level agent: calling it twice in one process replaces
+    the callback rather than stacking it.
+    """
+    from .callbacks import make_persist_report_callback
+
+    market_analyst_agent.after_agent_callback = make_persist_report_callback(
+        store, price_fetcher
+    )
