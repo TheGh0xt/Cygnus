@@ -81,4 +81,9 @@ jobs:
       - name: Run tests with sockets disabled
         # Enforces the standing rule that no test touches the network or Gemini.
         # If this fails, a test grew a real dependency — fix the test, not this job.
-        run: pytest tests/ --disable-socket
+        #
+        # --allow-unix-socket is required, not a loophole: asyncio's event loop
+        # builds its self-pipe from a socketpair, so async tests cannot run
+        # without AF_UNIX. Network (AF_INET) sockets stay blocked, which is the
+        # rule this job actually enforces.
+        run: pytest tests/ --disable-socket --allow-unix-socket
