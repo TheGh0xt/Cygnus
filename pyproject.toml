@@ -1,0 +1,29 @@
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+exclude = [".venv", ".venv-ci", ".adk", "__pycache__"]
+
+[tool.ruff.lint]
+# Pinned explicitly rather than relying on ruff's defaults: the default rule
+# set widens between ruff releases, and CI that changes its mind on a version
+# bump is worse than CI that lints a little less.
+select = [
+    "E4", "E7", "E9", # pycodestyle errors (the subset ruff enables by default)
+    "F",              # pyflakes
+    "I",              # import sorting
+    "B",              # flake8-bugbear
+    "BLE",            # blind except — we allow it only with an explicit noqa
+    "UP",             # pyupgrade
+]
+ignore = [
+    # Would rewrite the `str, Enum` bases in schemas/report.py to StrEnum.
+    # MarketAnalysisReport is a stable wire contract the evaluation engine and
+    # stored reports depend on, and StrEnum changes __str__ behaviour — not a
+    # refactor to make for style points.
+    "UP042",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# ADK discovers `root_agent` by importing the package, so the re-export in
+# __init__.py is load-bearing rather than dead.
+"__init__.py" = ["F401"]

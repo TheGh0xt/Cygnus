@@ -1,5 +1,14 @@
 google-adk>=2.3.0
 google-genai>=2.10.0
+# Imported directly by src/evaluation/worker.py (mcp.types, mcp.client).
+# google-adk does NOT declare it, so a clean install without this line fails
+# to import the worker — it only worked locally because the ADK pulled it in
+# transitively at some point.
+#
+# Upper bound is load-bearing: mcp 2.0.0 removed `McpHttpClientFactory`, which
+# google-adk 2.3.0 still imports, so an unpinned install breaks every ADK
+# import. Revisit only alongside an ADK upgrade that supports mcp 2.x.
+mcp>=1.28,<2
 pydantic>=2.0
 fastapi>=0.115
 uvicorn>=0.30
