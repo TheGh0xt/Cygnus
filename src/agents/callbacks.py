@@ -27,13 +27,19 @@ def resolve_slug_from_state(state: dict) -> str | None:
 
 
 def make_persist_report_callback(store, price_fetcher) -> Callable:
-    def persist_report(ctx):
-        raw = ctx.state.get("market_analysis_report")
+    # The parameter name is part of the contract: ADK invokes after-agent
+    # callbacks as `callback(callback_context=...)` by keyword, not
+    # positionally (see BaseAgent._handle_after_agent_callback). Renaming
+    # this parameter breaks the callback at runtime while unit tests that
+    # call it positionally keep passing.
+    def persist_report(callback_context):
+        state = callback_context.state
+        raw = state.get("market_analysis_report")
         if not raw:
             logger.warning("analyst produced no report; nothing to persist")
             return None
 
-        slug = resolve_slug_from_state(ctx.state)
+        slug = resolve_slug_from_state(state)
         if slug is None:
             logger.warning("no event_slug in state; storing report without slug")
             slug = ""

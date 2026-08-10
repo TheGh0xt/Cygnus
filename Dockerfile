@@ -22,8 +22,11 @@ USER cygnus
 
 EXPOSE 8000
 
-# Placeholder until Phase 1 lands the real API app factory
-# (`src.api.app:create_app`). Until then this image is only useful for the
-# evaluation worker, which is invoked with an explicit command override:
+# Serves the v1 HTTP API. The evaluation worker is a periodic job, run with
+# an explicit override rather than as the default command:
 #   docker run cygnus python -m src.evaluation.worker --db /data/pmie_memory.db
-CMD ["python", "-m", "src.evaluation.worker", "--help"]
+#
+# Single worker deliberately: the analysis registry is in-process, so a
+# second worker would not see analyses created by the first. Revisit when
+# Phase 3 needs horizontal scale.
+CMD ["uvicorn", "src.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

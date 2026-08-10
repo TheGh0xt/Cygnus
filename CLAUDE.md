@@ -80,6 +80,34 @@ Because ADK requires unique agent names and one parent per instance, `events.py`
 - The news agent retrieves and condenses cited items only (≤5 items, ≤250 words, `NO_RELEVANT_NEWS` sentinel); it never speculates on price impact.
 - The analyst may select EXTERNAL_NEWS only when the injected news digest contains a concrete, dated item, and must cite headline + source in the evidence.
 
+## HTTP API (Layer 4 surface)
+
+`src/api/` exposes the reasoning pipeline over HTTP. This is the only
+supported production entry point — `adk web` remains a local dev tool.
+
+- `POST /v1/analyses` → `201` with `analysis_id` and `stream_url`
+- `GET /v1/analyses/{id}/events` → SSE: `stage_started`, `stage_completed`,
+  `report`, `error`. Public stage names are `event_retrieval`,
+  `signal_retrieval`, `news_retrieval`, `analysis` — mapped from ADK event
+  authors in `pipeline.py`, so renaming an agent cannot break the UI contract.
+- `GET /v1/analyses/{id}` → the completed `MarketAnalysisReport`
+- Errors are RFC 9457 `application/problem+json`; clients switch on `type`,
+  never on `title` or `detail`
+
+`openapi.json` is committed and CI-enforced — regenerate with
+`python scripts/export_openapi.py` after changing any route or model.
+
+Run locally: `uvicorn src.api.app:create_app --factory --reload`
+
+Two constraints that bite when touching this:
+
+- **ADK invokes after-agent callbacks by keyword**: `callback(callback_context=...)`
+  (see `BaseAgent._handle_after_agent_callback`). A callback whose parameter is
+  named anything else raises "unexpected keyword argument" at runtime while
+  unit tests that call it positionally keep passing.
+- **Run one uvicorn worker.** The analysis registry is in-process, so a second
+  worker cannot see analyses created by the first.
+
 ### Layers 3 & 5 (in this repo)
 
 - `src/memory/` — **Layer 3 MVP**: `SqliteMemoryStore` persists `MarketAnalysisReport`s with the price observed at report time (`schema.sql` is kept portable for the planned pgvector store; vector search deferred). All writes happen in Cygnus — Sagittarius never touches this store.

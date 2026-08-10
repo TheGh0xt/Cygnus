@@ -55,7 +55,7 @@ def test_callback_persists_report_with_observed_price():
         "event_slug": "world-cup-winner",
         "market_analysis_report": _report().model_dump(),
     }
-    cb(FakeContext(state))
+    cb(callback_context=FakeContext(state))
     assert len(store.saved) == 1
     saved_report, slug, price = store.saved[0]
     assert slug == "world-cup-winner"
@@ -63,10 +63,23 @@ def test_callback_persists_report_with_observed_price():
     assert saved_report.market_id == "0xabc"
 
 
+def test_callback_accepts_adks_keyword_invocation():
+    """ADK calls after-agent callbacks as `callback(callback_context=...)`.
+
+    Pinned because a positional-only test passes happily while the real run
+    dies with "unexpected keyword argument" — which is exactly how this bug
+    reached a live analysis.
+    """
+    import inspect
+
+    cb = make_persist_report_callback(FakeStore(), FakeFetcher(0.5))
+    assert list(inspect.signature(cb).parameters) == ["callback_context"]
+
+
 def test_callback_is_noop_when_report_missing():
     store, fetcher = FakeStore(), FakeFetcher(0.62)
     cb = make_persist_report_callback(store, fetcher)
-    cb(FakeContext({"event_slug": "x"}))
+    cb(callback_context=FakeContext({"event_slug": "x"}))
     assert store.saved == []
 
 
@@ -79,6 +92,6 @@ def test_callback_survives_price_fetch_failure():
     store = FakeStore()
     cb = make_persist_report_callback(store, Failing())
     state = {"event_slug": "x", "market_analysis_report": _report().model_dump()}
-    cb(FakeContext(state))
+    cb(callback_context=FakeContext(state))
     assert len(store.saved) == 1
     assert store.saved[0][2] is None
