@@ -49,6 +49,14 @@ jobs:
       - name: Test
         run: pytest tests/ -v
 
+      - name: OpenAPI spec is current
+        # openapi.json is the contract the UI repo generates its client from.
+        # A stale file means the client and the server disagree silently.
+        run: |
+          python scripts/export_openapi.py
+          git diff --exit-code -- openapi.json \
+            || { echo "::error::openapi.json is stale — run 'python scripts/export_openapi.py' and commit."; exit 1; }
+
   no-network-guard:
     name: hermetic test guard
     runs-on: ubuntu-latest
