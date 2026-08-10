@@ -132,7 +132,9 @@ class SqliteMemoryStore:
             price_at_report=row["price_at_report"],
             created_at=datetime.fromisoformat(row["created_at"]),
             evaluated_at=(
-                datetime.fromisoformat(row["evaluated_at"]) if row["evaluated_at"] else None
+                datetime.fromisoformat(row["evaluated_at"])
+                if row["evaluated_at"]
+                else None
             ),
             outcome=row["outcome"],
         )
