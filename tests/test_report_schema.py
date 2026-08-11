@@ -12,7 +12,11 @@ VALID = {
     "primary_causal_driver": "WHALE_ACTIVITY",
     "confidence_score": 0.85,
     "key_drivers": [
-        {"type": "whale_trade", "impact": "HIGH", "evidence_summary": "$250k single-wallet buy"}
+        {
+            "type": "whale_trade",
+            "impact": "HIGH",
+            "evidence_summary": "$250k single-wallet buy",
+        }
     ],
 }
 
@@ -36,7 +40,9 @@ def test_confidence_out_of_range_rejected():
 
 def test_unknown_driver_rejected():
     with pytest.raises(ValidationError):
-        MarketAnalysisReport.model_validate({**VALID, "primary_causal_driver": "MOON_PHASE"})
+        MarketAnalysisReport.model_validate(
+            {**VALID, "primary_causal_driver": "MOON_PHASE"}
+        )
 
 
 def test_missing_required_field_rejected():

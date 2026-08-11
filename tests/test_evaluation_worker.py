@@ -16,7 +16,9 @@ from src.schemas.report import MarketAnalysisReport
 NOW = datetime(2026, 7, 4, 12, 0, 0, tzinfo=UTC)
 
 
-def make_report(confidence: float = 0.80, market_id: str = "0xabc") -> MarketAnalysisReport:
+def make_report(
+    confidence: float = 0.80, market_id: str = "0xabc"
+) -> MarketAnalysisReport:
     return MarketAnalysisReport.model_validate(
         {
             "market_id": market_id,
@@ -38,39 +40,53 @@ def make_report(confidence: float = 0.80, market_id: str = "0xabc") -> MarketAna
 class TestEvaluateReport:
     def test_held_price_confirms(self):
         # Price at report 0.58, now 0.585 — held within tolerance.
-        result = evaluate_report(make_report(0.80), price_at_report=0.58, current_price=0.585)
+        result = evaluate_report(
+            make_report(0.80), price_at_report=0.58, current_price=0.585
+        )
         assert result.outcome == "CONFIRMED"
         assert result.new_confidence == pytest.approx(0.80 + CONFIDENCE_INCREMENT)
 
     def test_extended_move_confirms(self):
         # Above-0.5 report price extended further upward.
-        result = evaluate_report(make_report(0.80), price_at_report=0.58, current_price=0.70)
+        result = evaluate_report(
+            make_report(0.80), price_at_report=0.58, current_price=0.70
+        )
         assert result.outcome == "CONFIRMED"
 
     def test_extended_move_below_half_confirms(self):
         # Below-0.5 report price extended further downward (same-direction move).
-        result = evaluate_report(make_report(0.80), price_at_report=0.30, current_price=0.20)
+        result = evaluate_report(
+            make_report(0.80), price_at_report=0.30, current_price=0.20
+        )
         assert result.outcome == "CONFIRMED"
 
     def test_reversal_decrements(self):
         # Price collapsed back toward 0.5 well beyond tolerance.
-        result = evaluate_report(make_report(0.80), price_at_report=0.58, current_price=0.50)
+        result = evaluate_report(
+            make_report(0.80), price_at_report=0.58, current_price=0.50
+        )
         assert result.outcome == "REVERSED"
         assert result.new_confidence == pytest.approx(0.80 - CONFIDENCE_DECREMENT)
 
     def test_confidence_caps_at_one(self):
-        result = evaluate_report(make_report(0.98), price_at_report=0.58, current_price=0.70)
+        result = evaluate_report(
+            make_report(0.98), price_at_report=0.58, current_price=0.70
+        )
         assert result.new_confidence == 1.0
 
     def test_confidence_floors_at_zero(self):
-        result = evaluate_report(make_report(0.05), price_at_report=0.58, current_price=0.40)
+        result = evaluate_report(
+            make_report(0.05), price_at_report=0.58, current_price=0.40
+        )
         assert result.new_confidence == 0.0
 
 
 class TestExtractProbabilityFromToolResult:
     def test_extracts_probability_from_text_content(self):
         result = CallToolResult(
-            content=[TextContent(type="text", text='{"markets": [{"probability": 0.61}]}')]
+            content=[
+                TextContent(type="text", text='{"markets": [{"probability": 0.61}]}')
+            ]
         )
 
         assert _extract_probability_from_tool_result(result) == 0.61

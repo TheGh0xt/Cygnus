@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Agent construction imports the ADK, which expects this to exist.
+  # A dummy value keeps CI hermetic — no test may make a real model call.
+  GOOGLE_API_KEY: ci-dummy-key-not-a-real-credential
+  SAGITTARIUS_MCP_URL: http://localhost:8080/mcp
+
+jobs:
+  test:
+    name: lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: Ruff (format check)
+        run: ruff format --check .
+
+      - name: Test
+        run: pytest tests/ -v
+
+  no-network-guard:
+    name: hermetic test guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install pytest-socket
+
+      - name: Run tests with sockets disabled
+        # Enforces the standing rule that no test touches the network or Gemini.
+        # If this fails, a test grew a real dependency — fix the test, not this job.
+        run: pytest tests/ --disable-socket

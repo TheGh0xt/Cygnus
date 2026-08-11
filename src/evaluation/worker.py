@@ -158,7 +158,12 @@ class SagittariusPriceFetcher:
                     "get_event_by_slug", {"slug": market_slug}
                 )
                 return _extract_probability_from_tool_result(result)
-        except Exception:
+        except Exception:  # noqa: BLE001 — deliberate degraded path
+            # Any failure to reach Sagittarius or parse its reply means "no
+            # price observed": the caller leaves the report due and retries on
+            # the next cycle rather than scoring it against missing data.
+            # Narrowing this would let a new transport error abort a whole
+            # evaluation run. Structured logging arrives with Phase 1.9.
             return None
 
 
