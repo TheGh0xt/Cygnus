@@ -4,6 +4,8 @@ import re
 
 from pydantic import BaseModel, Field
 
+from ..schemas.report import MarketAnalysisReport
+
 _URL_SLUG = re.compile(r"polymarket\.com/event/([a-z0-9-]+)", re.IGNORECASE)
 _BARE_SLUG = re.compile(r"\b([a-z0-9]+(?:-[a-z0-9]+){2,})\b")
 
@@ -22,7 +24,11 @@ class AnalysisCreated(BaseModel):
 class AnalysisResult(BaseModel):
     analysis_id: str
     status: str
-    report: dict | None = None
+    # Typed rather than a bare dict so MarketAnalysisReport lands in
+    # openapi.json. A `dict` here serialises as an untyped object, which
+    # would leave the generated UI client with no types for the one payload
+    # that actually matters — drivers, confidence, evidence.
+    report: MarketAnalysisReport | None = None
     error: str | None = None
 
 

@@ -43,12 +43,22 @@ class FakeRunner:
             yield FakeEvent(author)
         yield FakeEvent(
             "market_analyst_agent",
+            # Must be a schema-valid MarketAnalysisReport: the response model
+            # validates it, so an incomplete fake here would pass a test the
+            # real pipeline could never satisfy.
             report={
                 "market_id": "0xabc",
+                "timestamp": "2026-08-12T00:00:00+00:00",
                 "summary": "whale accumulation",
                 "primary_causal_driver": "WHALE_ACTIVITY",
                 "confidence_score": 0.75,
-                "key_drivers": [],
+                "key_drivers": [
+                    {
+                        "type": "WHALE_ACTIVITY",
+                        "impact": "HIGH",
+                        "evidence_summary": "$92.3k net buy on the England market",
+                    }
+                ],
             },
         )
 

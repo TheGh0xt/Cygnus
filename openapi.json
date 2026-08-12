@@ -70,14 +70,12 @@
           "report": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/MarketAnalysisReport"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Report"
+            ]
           },
           "status": {
             "title": "Status",
@@ -91,6 +89,17 @@
         "title": "AnalysisResult",
         "type": "object"
       },
+      "CausalDriver": {
+        "enum": [
+          "WHALE_ACTIVITY",
+          "VOLUME_SPIKE",
+          "LIQUIDITY_CRUNCH",
+          "EXTERNAL_NEWS",
+          "UNKNOWN_ANOMALY"
+        ],
+        "title": "CausalDriver",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -102,6 +111,108 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HistoricalContextMatch": {
+        "properties": {
+          "previous_market_id": {
+            "title": "Previous Market Id",
+            "type": "string"
+          },
+          "prior_explanation_accuracy": {
+            "title": "Prior Explanation Accuracy",
+            "type": "number"
+          }
+        },
+        "required": [
+          "previous_market_id",
+          "prior_explanation_accuracy"
+        ],
+        "title": "HistoricalContextMatch",
+        "type": "object"
+      },
+      "Impact": {
+        "enum": [
+          "HIGH",
+          "MEDIUM",
+          "LOW"
+        ],
+        "title": "Impact",
+        "type": "string"
+      },
+      "KeyDriver": {
+        "properties": {
+          "evidence_summary": {
+            "title": "Evidence Summary",
+            "type": "string"
+          },
+          "impact": {
+            "$ref": "#/components/schemas/Impact"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "impact",
+          "evidence_summary"
+        ],
+        "title": "KeyDriver",
+        "type": "object"
+      },
+      "MarketAnalysisReport": {
+        "properties": {
+          "confidence_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence Score",
+            "type": "number"
+          },
+          "historical_context_match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HistoricalContextMatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "key_drivers": {
+            "items": {
+              "$ref": "#/components/schemas/KeyDriver"
+            },
+            "title": "Key Drivers",
+            "type": "array"
+          },
+          "market_id": {
+            "title": "Market Id",
+            "type": "string"
+          },
+          "primary_causal_driver": {
+            "$ref": "#/components/schemas/CausalDriver"
+          },
+          "summary": {
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "market_id",
+          "timestamp",
+          "summary",
+          "primary_causal_driver",
+          "confidence_score",
+          "key_drivers"
+        ],
+        "title": "MarketAnalysisReport",
         "type": "object"
       },
       "ValidationError": {
@@ -247,11 +358,13 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "Server-sent events. One `stage_started` / `stage_completed` pair per pipeline stage (event_retrieval, signal_retrieval, news_retrieval, analysis), then a terminal `report` or `error` event. Each `data:` line is a JSON object `{stage, data}`."
           },
           "422": {
             "content": {

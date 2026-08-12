@@ -57,7 +57,24 @@ async def get_analysis(analysis_id: str, request: Request):
     )
 
 
-@router.get("/analyses/{analysis_id}/events")
+@router.get(
+    "/analyses/{analysis_id}/events",
+    # OpenAPI cannot describe an SSE frame sequence, but it can at least stop
+    # claiming this returns JSON. Client generators key off the media type.
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": (
+                "Server-sent events. One `stage_started` / `stage_completed` "
+                "pair per pipeline stage (event_retrieval, signal_retrieval, "
+                "news_retrieval, analysis), then a terminal `report` or "
+                "`error` event. Each `data:` line is a JSON object "
+                "`{stage, data}`."
+            ),
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        }
+    },
+)
 async def stream_analysis(analysis_id: str, request: Request):
     record = request.app.state.registry.get(analysis_id)
     if record is None:
