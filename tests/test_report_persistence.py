@@ -95,3 +95,36 @@ def test_callback_survives_price_fetch_failure():
     cb(callback_context=FakeContext(state))
     assert len(store.saved) == 1
     assert store.saved[0][2] is None
+
+
+async def test_price_is_fetched_even_inside_a_running_event_loop():
+    """The API calls this callback from inside asyncio.
+
+    SagittariusPriceFetcher uses asyncio.run(), which raises inside a running
+    loop. A direct call therefore fails in production while every unit test
+    that runs synchronously passes — so every report was persisted with a null
+    price and was silently unscoreable. The fetch runs in a worker thread to
+    avoid that.
+    """
+    import asyncio
+
+    class LoopSensitiveFetcher:
+        def current_probability(self, market_slug):
+            # Mirrors the real fetcher: blows up if a loop is already running
+            # on this thread.
+            return asyncio.run(self._value())
+
+        async def _value(self):
+            return 0.33
+
+    store = FakeStore()
+    cb = make_persist_report_callback(store, LoopSensitiveFetcher())
+    state = {
+        "event_slug": "world-cup-winner",
+        "market_analysis_report": _report().model_dump(),
+    }
+
+    cb(callback_context=FakeContext(state))
+
+    assert len(store.saved) == 1
+    assert store.saved[0][2] == 0.33, "price must survive the running loop"

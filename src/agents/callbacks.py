@@ -8,6 +8,7 @@ now is permanently unscoreable.
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 from collections.abc import Callable
 
@@ -54,17 +55,32 @@ def make_persist_report_callback(store, price_fetcher) -> Callable:
             logger.exception("analyst output failed schema validation")
             return None
 
-        try:
-            price = price_fetcher.current_probability(slug)
-        except Exception:
-            # Degraded-but-successful: persist the report anyway. A null
-            # price means the evaluation worker skips it, which is strictly
-            # better than losing the report entirely.
-            logger.exception("price fetch failed; persisting without price")
-            price = None
+        price = _fetch_price(price_fetcher, slug)
 
         store.save_report(report, slug, price)
         logger.info("persisted report for %s", slug or "<unknown slug>")
         return None
 
     return persist_report
+
+
+# The fetch runs in a worker thread on purpose. SagittariusPriceFetcher calls
+# asyncio.run(), which raises "cannot be called from a running event loop" when
+# invoked from inside the async API — so a direct call here always fails and
+# every report would be stored with a null price, silently unscoreable. A
+# fresh thread has no running loop, so asyncio.run() works there.
+_PRICE_TIMEOUT_SECONDS = 30
+
+
+def _fetch_price(price_fetcher, slug: str) -> float | None:
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(price_fetcher.current_probability, slug).result(
+                timeout=_PRICE_TIMEOUT_SECONDS
+            )
+    except Exception:
+        # Degraded-but-successful: persist the report anyway. A null price
+        # means the evaluation worker skips it, which is strictly better than
+        # losing the report entirely.
+        logger.exception("price fetch failed; persisting without price")
+        return None

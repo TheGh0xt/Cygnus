@@ -16,13 +16,21 @@ def test_unknown_author_has_no_public_stage():
     assert stage_for_author("polymarket_orchestrator") is None
 
 
+class FakeActions:
+    """Mirrors ADK's EventActions: output_key writes arrive as state_delta."""
+
+    def __init__(self, state_delta=None):
+        self.state_delta = state_delta or {}
+
+
 class FakeEvent:
-    def __init__(self, author, report=None):
+    def __init__(self, author, report=None, final=False):
         self.author = author
-        self.report = report
+        self.actions = FakeActions({"market_analysis_report": report} if report else {})
+        self._final = final or report is not None
 
     def is_final_response(self):
-        return self.report is not None
+        return self._final
 
 
 class FakeSessionService:

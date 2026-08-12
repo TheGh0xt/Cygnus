@@ -48,16 +48,20 @@ def build_runner(db_path: str):
     )
 
 
-def _report_from_event(event, session_state: dict | None) -> dict | None:
-    """Pull the analyst's structured output.
+REPORT_KEY = "market_analysis_report"
 
-    Prefer session state (`market_analysis_report`, written by the analyst's
-    output_key) and fall back to an event-carried report, which is what test
-    fakes provide.
+
+def _state_delta(event) -> dict:
+    """State an agent wrote on this event.
+
+    ADK surfaces an agent's `output_key` write as `actions.state_delta`. The
+    Session returned by `create_session` is a snapshot taken *before* the run,
+    so reading its `.state` afterwards never sees the analyst's output —
+    accumulating deltas is the only way to observe it while streaming.
     """
-    if session_state and session_state.get("market_analysis_report"):
-        return session_state["market_analysis_report"]
-    return getattr(event, "report", None)
+    actions = getattr(event, "actions", None)
+    delta = getattr(actions, "state_delta", None) if actions else None
+    return delta if isinstance(delta, dict) else {}
 
 
 class AnalysisPipeline:
@@ -78,7 +82,7 @@ class AnalysisPipeline:
                 state={"event_slug": slug},
             )
             message = types.Content(role="user", parts=[types.Part(text=query)])
-            final = None
+            state: dict = {}
 
             async for event in self._runner.run_async(
                 user_id=self._user_id,
@@ -91,16 +95,18 @@ class AnalysisPipeline:
                     self._registry.publish(
                         analysis_id, StageEvent("stage_started", stage, {})
                     )
-                if event.is_final_response():
-                    if stage:
-                        self._registry.publish(
-                            analysis_id, StageEvent("stage_completed", stage, {})
-                        )
-                    final = (
-                        _report_from_event(event, getattr(session, "state", None))
-                        or final
+                state.update(_state_delta(event))
+
+                if event.is_final_response() and stage:
+                    self._registry.publish(
+                        analysis_id, StageEvent("stage_completed", stage, {})
                     )
 
+            final = state.get(REPORT_KEY)
+            if final is None:
+                # Deltas can be missed if a stage wrote state without emitting
+                # a delta we saw; re-read the persisted session before failing.
+                final = await self._report_from_session(session.id)
             if final is None:
                 raise RuntimeError("pipeline produced no report")
 
@@ -116,3 +122,15 @@ class AnalysisPipeline:
             # Always terminate the stream, success or failure, or an SSE
             # client waits forever.
             self._registry.close(analysis_id)
+
+    async def _report_from_session(self, session_id: str) -> dict | None:
+        """Re-read the persisted session state as a fallback."""
+        try:
+            session = await self._runner.session_service.get_session(
+                app_name=APP_NAME, user_id=self._user_id, session_id=session_id
+            )
+        except Exception:
+            logger.exception("could not re-read session %s", session_id)
+            return None
+        state = getattr(session, "state", None) or {}
+        return state.get(REPORT_KEY)
