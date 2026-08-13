@@ -3,6 +3,11 @@
 .adk
 __pycache__
 *.db
+# ADK session store: build_runner writes "<db_path>.sessions", which *.db
+# does not match. Kept narrow rather than ignoring src/ paths wholesale —
+# a bare directory entry here once swallowed an entire web UI.
+*.db.sessions
+.venv-ci
 
 # docs are local-only, except the tracked canonical spec
 docs/*

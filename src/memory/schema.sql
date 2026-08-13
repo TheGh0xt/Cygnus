@@ -7,7 +7,10 @@ CREATE TABLE IF NOT EXISTS analysis_reports (
     market_slug TEXT NOT NULL,
     report_json TEXT NOT NULL,          -- full MarketAnalysisReport JSON
     confidence_score REAL NOT NULL,     -- denormalized, updated by evaluation
-    price_at_report REAL NOT NULL,
+    -- Nullable: if the price fetch fails at report time we still persist the
+    -- report rather than losing it. The evaluation worker skips rows with a
+    -- null price, which is recoverable; a dropped report never is.
+    price_at_report REAL,
     created_at TEXT NOT NULL,           -- ISO-8601 UTC
     evaluated_at TEXT,
     outcome TEXT                        -- CONFIRMED / REVERSED / NULL

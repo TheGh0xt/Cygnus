@@ -139,6 +139,18 @@ class TestRunEvaluationCycle:
         assert stored.outcome == "CONFIRMED"
         assert stored.report.confidence_score == pytest.approx(0.85)
 
+    def test_reports_stored_without_a_price_are_skipped(self, store):
+        # price_at_report is nullable: the API persists a report even when the
+        # price fetch failed, rather than losing it. Such a report has no
+        # baseline to score against, so the cycle must skip it instead of
+        # raising on None arithmetic.
+        store.save_report(make_report(0.80), "slug-a", None, created_at=NOW)
+        later = NOW + timedelta(hours=49)
+
+        count = run_evaluation_cycle(store, FakeFetcher({"slug-a": 0.70}), now=later)
+
+        assert count == 0
+
     def test_unfetchable_markets_stay_due(self, store):
         store.save_report(make_report(0.80), "slug-gone", 0.58, created_at=NOW)
         later = NOW + timedelta(hours=49)

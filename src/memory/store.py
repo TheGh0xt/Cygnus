@@ -25,7 +25,9 @@ class StoredReport:
     market_id: str
     market_slug: str
     report: MarketAnalysisReport
-    price_at_report: float
+    # None when the price fetch failed at report time; such reports are
+    # persisted anyway and skipped by the evaluation cycle.
+    price_at_report: float | None
     created_at: datetime
     evaluated_at: datetime | None
     outcome: str | None  # "CONFIRMED" | "REVERSED" | None
@@ -42,7 +44,7 @@ class SqliteMemoryStore:
         self,
         report: MarketAnalysisReport,
         market_slug: str,
-        price_at_report: float,
+        price_at_report: float | None,
         created_at: datetime | None = None,
     ) -> int:
         created = created_at or datetime.now(tz=UTC)

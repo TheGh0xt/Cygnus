@@ -49,6 +49,14 @@ jobs:
       - name: Test
         run: pytest tests/ -v
 
+      - name: OpenAPI spec is current
+        # openapi.json is the contract the UI repo generates its client from.
+        # A stale file means the client and the server disagree silently.
+        run: |
+          python scripts/export_openapi.py
+          git diff --exit-code -- openapi.json \
+            || { echo "::error::openapi.json is stale — run 'python scripts/export_openapi.py' and commit."; exit 1; }
+
   no-network-guard:
     name: hermetic test guard
     runs-on: ubuntu-latest
@@ -73,4 +81,9 @@ jobs:
       - name: Run tests with sockets disabled
         # Enforces the standing rule that no test touches the network or Gemini.
         # If this fails, a test grew a real dependency — fix the test, not this job.
-        run: pytest tests/ --disable-socket
+        #
+        # --allow-unix-socket is required, not a loophole: asyncio's event loop
+        # builds its self-pipe from a socketpair, so async tests cannot run
+        # without AF_UNIX. Network (AF_INET) sockets stay blocked, which is the
+        # rule this job actually enforces.
+        run: pytest tests/ --disable-socket --allow-unix-socket

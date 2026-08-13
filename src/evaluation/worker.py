@@ -112,6 +112,13 @@ def run_evaluation_cycle(
     evaluated = 0
 
     for stored in store.get_reports_due_for_evaluation(now):
+        if stored.price_at_report is None:
+            # Persisted without an observation price because the price fetch
+            # failed at report time. There is no baseline to score against and
+            # one can never be reconstructed, so skip it permanently rather
+            # than scoring it against a guess.
+            continue
+
         current = prices.current_probability(stored.market_slug)
         if current is None:
             continue
