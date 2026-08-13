@@ -100,6 +100,31 @@
         "title": "CausalDriver",
         "type": "string"
       },
+      "FeedbackRequest": {
+        "properties": {
+          "is_useful": {
+            "title": "Is Useful",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "is_useful"
+        ],
+        "title": "FeedbackRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -139,6 +164,24 @@
         ],
         "title": "Impact",
         "type": "string"
+      },
+      "InterestsRequest": {
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Categories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "categories"
+        ],
+        "title": "InterestsRequest",
+        "type": "object"
       },
       "KeyDriver": {
         "properties": {
@@ -380,6 +423,49 @@
         "summary": "Stream Analysis"
       }
     },
+    "/v1/analyses/{analysis_id}/feedback": {
+      "post": {
+        "description": "Useful / not useful on a report.\n\nCloses the gap left by Phase 1: the API contract listed this endpoint but\nit was never built, so the UI had nothing to call.",
+        "operationId": "submit_feedback_v1_analyses__analysis_id__feedback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Feedback"
+      }
+    },
     "/v1/health": {
       "get": {
         "operationId": "health_v1_health_get",
@@ -398,6 +484,88 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/v1/interests/categories": {
+      "get": {
+        "description": "The selectable categories.\n\nServed from the database rather than hardcoded in the client so the list\nand its labels have one source of truth.",
+        "operationId": "interest_categories_v1_interests_categories_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Interest Categories V1 Interests Categories Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Interest Categories"
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "description": "The caller's profile, interests and usage.\n\nOne call so the client can render the whole authenticated shell \u2014 header,\nusage indicator, onboarding state \u2014 without a waterfall of requests.",
+        "operationId": "me_v1_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Me V1 Me Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Me"
+      }
+    },
+    "/v1/me/interests": {
+      "put": {
+        "operationId": "set_interests_v1_me_interests_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterestsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Interests V1 Me Interests Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Interests"
       }
     },
     "/v1/ready": {

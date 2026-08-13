@@ -5,6 +5,7 @@ No network, no Gemini, no Sagittarius — this must stay hermetic to pass the
 """
 
 import json
+import os
 
 from fastapi.testclient import TestClient
 
@@ -71,7 +72,11 @@ class FakeRunner:
         )
 
 
-def _client(tmp_path):
+def _client(tmp_path, monkeypatch=None):
+    # The contract tests exercise the analysis surface, not authentication;
+    # auth has its own suite. Disabling it here keeps them hermetic — there is
+    # no Supabase to reach in CI.
+    os.environ["PMIE_AUTH_DISABLED"] = "1"
     app = create_app(db_path=str(tmp_path / "e2e.db"))
     app.state.pipeline = AnalysisPipeline(app.state.registry, FakeRunner())
     return TestClient(app)

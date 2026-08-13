@@ -8,6 +8,7 @@ does not break the UI contract.
 from __future__ import annotations
 
 import logging
+import time
 
 from google.genai import types
 
@@ -65,14 +66,29 @@ def _state_delta(event) -> dict:
 
 
 class AnalysisPipeline:
-    def __init__(self, registry: AnalysisRegistry, runner, user_id: str = "pmie"):
+    def __init__(
+        self,
+        registry: AnalysisRegistry,
+        runner,
+        user_id: str = "pmie",
+        accounts=None,
+    ):
         self._registry = registry
         self._runner = runner
         self._user_id = user_id
+        self._accounts = accounts
 
-    async def run(self, analysis_id: str, query: str, slug: str) -> None:
+    async def run(
+        self,
+        analysis_id: str,
+        query: str,
+        slug: str,
+        profile_id: str | None = None,
+    ) -> None:
         self._registry.mark_running(analysis_id)
         seen: set[str] = set()
+        started = time.monotonic()
+        outcome = "failed"
         try:
             session = await self._runner.session_service.create_session(
                 app_name=APP_NAME,
@@ -111,6 +127,7 @@ class AnalysisPipeline:
                 raise RuntimeError("pipeline produced no report")
 
             self._registry.mark_completed(analysis_id, final)
+            outcome = "completed"
             self._registry.publish(analysis_id, StageEvent("report", None, final))
         except Exception as exc:
             logger.exception("analysis %s failed", analysis_id)
@@ -122,6 +139,17 @@ class AnalysisPipeline:
             # Always terminate the stream, success or failure, or an SSE
             # client waits forever.
             self._registry.close(analysis_id)
+            if self._accounts is not None and profile_id:
+                # Recorded for every attempt. Only 'completed' rows count
+                # toward an allowance — a failed analysis must never consume
+                # a credit, which is a stated term at the payment boundary.
+                self._accounts.record_usage(
+                    profile_id=profile_id,
+                    analysis_id=analysis_id,
+                    outcome=outcome,
+                    event_slug=slug or None,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                )
 
     async def _report_from_session(self, session_id: str) -> dict | None:
         """Re-read the persisted session state as a fallback."""
