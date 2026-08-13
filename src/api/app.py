@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 
 from ..agents.analyst import attach_persistence
 from ..evaluation.worker import SagittariusPriceFetcher
-from ..memory.store import SqliteMemoryStore
+from ..memory import build_memory_store
 from .accounts import Accounts
 from .auth import JwksCache
 from .errors import PmieError, problem_response
@@ -25,7 +25,10 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
         description="Causal explanations for Polymarket price moves.",
     )
 
-    store = SqliteMemoryStore(db_path)
+    # Postgres when Supabase is configured, SQLite otherwise. A deployed
+    # instance must not keep this on a container filesystem that is wiped
+    # on restart — the observed price in each row cannot be recreated.
+    store = build_memory_store(db_path)
     fetcher = SagittariusPriceFetcher(
         os.getenv("SAGITTARIUS_MCP_URL", "http://localhost:8080/mcp")
     )

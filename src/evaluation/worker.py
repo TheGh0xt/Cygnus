@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
+from ..memory import build_memory_store
 from ..memory.store import SqliteMemoryStore
 from ..schemas.report import MarketAnalysisReport
 
@@ -183,7 +184,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    store = SqliteMemoryStore(args.db)
+    store = build_memory_store(args.db)
     fetcher = SagittariusPriceFetcher(
         os.getenv("SAGITTARIUS_MCP_URL", "http://localhost:8080/mcp")
     )
