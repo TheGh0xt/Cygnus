@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import FastAPI, Request
@@ -7,6 +8,8 @@ from fastapi import FastAPI, Request
 from ..agents.analyst import attach_persistence
 from ..evaluation.worker import SagittariusPriceFetcher
 from ..memory.store import SqliteMemoryStore
+from .accounts import Accounts
+from .auth import JwksCache
 from .errors import PmieError, problem_response
 from .logging import configure_logging, new_request_id, request_id_var
 from .pipeline import AnalysisPipeline, build_runner
@@ -28,10 +31,25 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     )
     attach_persistence(store, fetcher)
 
+    accounts = Accounts()
+    app.state.accounts = accounts
+    app.state.jwks = JwksCache()
+
+    # Auth is on by default. Disabling it is a startup-time decision captured
+    # here, so a stray environment variable cannot switch off authentication
+    # part-way through a running process.
+    app.state.auth_disabled = os.getenv("PMIE_AUTH_DISABLED") == "1"
+    if app.state.auth_disabled:
+        logging.getLogger("cygnus.api").warning(
+            "authentication is DISABLED; every request runs as a fixed local user"
+        )
+
     registry = AnalysisRegistry()
     app.state.registry = registry
     app.state.tasks = set()
-    app.state.pipeline = AnalysisPipeline(registry, build_runner(f"{db_path}.sessions"))
+    app.state.pipeline = AnalysisPipeline(
+        registry, build_runner(f"{db_path}.sessions"), accounts=accounts
+    )
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):

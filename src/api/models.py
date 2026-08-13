@@ -21,6 +21,18 @@ class AnalysisCreated(BaseModel):
     status: str
 
 
+class InterestsRequest(BaseModel):
+    # Range is enforced in the accounts layer, not here, so the API can return
+    # one consistent message whether the list is too short, too long, or full
+    # of duplicates that collapse below the minimum.
+    categories: list[str] = Field(min_length=1, max_length=20)
+
+
+class FeedbackRequest(BaseModel):
+    is_useful: bool
+    note: str | None = Field(default=None, max_length=2000)
+
+
 class AnalysisResult(BaseModel):
     analysis_id: str
     status: str
