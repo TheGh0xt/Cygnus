@@ -29,7 +29,9 @@ def build_memory_store(db_path: str = "pmie_memory.db"):
     there is silent, and only discovered when the accuracy record turns out to
     be empty.
     """
-    if os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
+    from ..api.config import supabase_secret_key, supabase_url
+
+    if supabase_url() and supabase_secret_key():
         from .postgres_store import PostgresMemoryStore
 
         logger.info("memory store: postgres")

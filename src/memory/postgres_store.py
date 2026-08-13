@@ -20,11 +20,11 @@ manage.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime, timedelta
 
 import httpx
 
+from ..api.config import supabase_secret_key, supabase_url
 from ..schemas.report import MarketAnalysisReport
 from .store import StoredReport
 
@@ -39,11 +39,12 @@ class MemoryStoreError(Exception):
 
 class PostgresMemoryStore:
     def __init__(self, base_url: str | None = None, service_key: str | None = None):
-        self._base_url = (base_url or os.getenv("SUPABASE_URL", "")).rstrip("/")
-        self._service_key = service_key or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+        self._base_url = (base_url or supabase_url()).rstrip("/")
+        self._service_key = service_key or supabase_secret_key()
         if not (self._base_url and self._service_key):
             raise MemoryStoreError(
-                "PostgresMemoryStore needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"
+                "PostgresMemoryStore needs SUPABASE_URL and a secret key "
+                "(SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY)"
             )
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from .accounts import FREE_MONTHLY_ANALYSES, AccountsError
+from .config import describe_supabase_config
 from .dependencies import current_user, require_invited
 from .errors import ErrorType, PmieError
 from .models import (
@@ -36,6 +38,8 @@ _AUTH_ERRORS = {
     403: {"description": "Signed in but not invited to the alpha", **PROBLEM},
     503: {"description": "A dependency is unavailable", **PROBLEM},
 }
+
+logger = logging.getLogger("cygnus.api.routes")
 
 router = APIRouter(prefix="/v1")
 
@@ -226,6 +230,13 @@ async def interest_categories(request: Request) -> dict:
     try:
         return {"categories": accounts.list_categories()}
     except AccountsError as exc:
+        # Log the cause. Without this a misconfigured key produces a bare 503
+        # and nothing actionable in the deployment's logs.
+        logger.error(
+            "could not load categories: %s | supabase config: %s",
+            exc,
+            describe_supabase_config(),
+        )
         raise PmieError(
             ErrorType.INTERNAL_ERROR, "Could not load categories.", status=503
         ) from exc

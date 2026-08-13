@@ -12,13 +12,14 @@ never leave this process.
 from __future__ import annotations
 
 import logging
-import os
 import time
 from dataclasses import dataclass
 
 import httpx
 import jwt
 from jwt import PyJWKClient
+
+from .config import supabase_url as _supabase_url
 
 logger = logging.getLogger("cygnus.api.auth")
 
@@ -47,10 +48,10 @@ class CurrentUser:
 
 
 def supabase_url() -> str:
-    url = os.getenv("SUPABASE_URL")
+    url = _supabase_url()
     if not url:
         raise RuntimeError("SUPABASE_URL is not set")
-    return url.rstrip("/")
+    return url
 
 
 def extract_bearer_token(header: str | None) -> str:
