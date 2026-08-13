@@ -1,0 +1,56 @@
+# Render blueprint for Cygnus (PMIE Layers 3, 4 and 5).
+#
+# Connect this repo in Render's dashboard and it reads this file.
+#
+# ---------------------------------------------------------------------------
+# KNOWN LIMITATION ON THE FREE PLAN: the filesystem is ephemeral.
+#
+# Cygnus writes its memory store to SQLite on local disk. Render's persistent
+# disks are a paid feature, so on a free instance every restart, redeploy and
+# wake-from-sleep starts with an empty database.
+#
+# That matters more than it sounds. The memory store holds every completed
+# report together with the price observed at the time, and that price cannot
+# be reconstructed later — it is the input the evaluation worker scores 48
+# hours on. Losing it means no accuracy record, which is the product's whole
+# claim to being worth anything.
+#
+# So this configuration is fine for demonstrating the API and exercising the
+# UI, and NOT fine for collecting the data the accuracy record depends on.
+#
+# The fix is to move the memory store to the Supabase Postgres this project
+# already uses for accounts. The store exposes five methods across three call
+# sites, so it is a contained change, and it is the direction Phase 4 needs
+# anyway for pgvector-backed semantic search.
+# ---------------------------------------------------------------------------
+
+services:
+  - type: web
+    name: cygnus
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /v1/health
+    envVars:
+      - key: PORT
+        value: 8000
+
+      # Where Sagittarius is reachable. Point this at the deployed Layer 1
+      # service, not localhost.
+      - key: SAGITTARIUS_MCP_URL
+        sync: false
+
+      # Secrets: set these in Render's dashboard, never in this file.
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      # PMIE_AUTH_DISABLED is deliberately absent. Authentication is on unless
+      # explicitly switched off, and a deployed instance must never have it
+      # off: an unauthenticated public endpoint would let anyone spend the
+      # project's Gemini quota.
+    autoDeploy: true
