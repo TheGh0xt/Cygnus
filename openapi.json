@@ -461,6 +461,58 @@
         "title": "ProblemResponse",
         "type": "object"
       },
+      "ReadyChecks": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "report_store_writable": {
+            "title": "Report Store Writable",
+            "type": "string"
+          }
+        },
+        "required": [
+          "report_store_writable"
+        ],
+        "title": "ReadyChecks",
+        "type": "object"
+      },
+      "ReadyResponse": {
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/ReadyChecks"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "checks"
+        ],
+        "title": "ReadyResponse",
+        "type": "object"
+      },
       "UsageSummary": {
         "properties": {
           "analyses_this_month": {
@@ -945,13 +997,14 @@
     },
     "/v1/ready": {
       "get": {
+        "description": "Reports whether this process can do its job, not merely that it is up.\n\nDistinct from /health on purpose: a server that cannot persist reports\nanswers /health perfectly well while silently discarding the only data\nthe product's claims rest on.",
         "operationId": "ready_v1_ready_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
+                  "$ref": "#/components/schemas/ReadyResponse"
                 }
               }
             },

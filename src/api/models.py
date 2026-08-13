@@ -60,6 +60,19 @@ class HealthResponse(BaseModel):
     service: str | None = None
 
 
+class ReadyChecks(BaseModel):
+    # "ok" | "failed" | "unknown" — unknown when Supabase is not configured,
+    # which is the normal local-development case.
+    report_store_writable: str
+    detail: str | None = None
+
+
+class ReadyResponse(BaseModel):
+    status: str
+    service: str | None = None
+    checks: ReadyChecks
+
+
 class ProblemResponse(BaseModel):
     """RFC 9457 problem+json.
 
