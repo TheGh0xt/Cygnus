@@ -14,10 +14,11 @@ and the failure modes small.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 
 import httpx
+
+from .config import supabase_secret_key, supabase_url
 
 logger = logging.getLogger("cygnus.api.accounts")
 
@@ -48,8 +49,8 @@ class Profile:
 
 class Accounts:
     def __init__(self, base_url: str | None = None, service_key: str | None = None):
-        self._base_url = (base_url or os.getenv("SUPABASE_URL", "")).rstrip("/")
-        self._service_key = service_key or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+        self._base_url = (base_url or supabase_url()).rstrip("/")
+        self._service_key = service_key or supabase_secret_key()
 
     @property
     def configured(self) -> bool:

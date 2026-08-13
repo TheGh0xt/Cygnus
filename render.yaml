@@ -46,6 +46,8 @@ services:
         sync: false
       - key: SUPABASE_URL
         sync: false
+      # Either name works. Supabase's connect panel calls it
+      # SUPABASE_SECRET_KEY, so that block can be pasted straight in.
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
 
