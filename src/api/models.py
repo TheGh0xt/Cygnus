@@ -21,6 +21,60 @@ class AnalysisCreated(BaseModel):
     status: str
 
 
+class InterestCategory(BaseModel):
+    slug: str
+    label: str
+    description: str | None = None
+    sort_order: int = 0
+
+
+class CategoriesResponse(BaseModel):
+    categories: list[InterestCategory]
+
+
+class InterestsResponse(BaseModel):
+    interests: list[str]
+
+
+class UsageSummary(BaseModel):
+    analyses_this_month: int
+    free_monthly_allowance: int
+    # Reported, not enforced. Pricing stays gated behind a published accuracy
+    # record, so today this only tells a user where they stand.
+    enforced: bool = False
+
+
+class MeResponse(BaseModel):
+    id: str
+    email: str | None = None
+    display_name: str | None = None
+    is_invited: bool
+    is_grandfathered: bool
+    onboarding_completed: bool
+    interests: list[str]
+    usage: UsageSummary
+
+
+class HealthResponse(BaseModel):
+    status: str
+    service: str | None = None
+
+
+class ProblemResponse(BaseModel):
+    """RFC 9457 problem+json.
+
+    Declared so the documented error shape matches what the API actually
+    returns; clients switch on `type`, never on `title` or `detail`.
+    """
+
+    type: str
+    title: str
+    status: int
+    detail: str
+    instance: str | None = None
+    request_id: str | None = None
+
+
 class InterestsRequest(BaseModel):
     # Range is enforced in the accounts layer, not here, so the API can return
     # one consistent message whether the list is too short, too long, or full

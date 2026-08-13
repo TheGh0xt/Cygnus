@@ -13,6 +13,7 @@ from .auth import JwksCache
 from .errors import PmieError, problem_response
 from .logging import configure_logging, new_request_id, request_id_var
 from .pipeline import AnalysisPipeline, build_runner
+from .ratelimit import RateLimiter
 from .registry import AnalysisRegistry
 from .routes import router
 
@@ -46,6 +47,17 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
         logging.getLogger("cygnus.api").warning(
             "authentication is DISABLED; every request runs as a fixed local user"
         )
+
+    # Protects the model budget rather than rationing a scarce resource:
+    # a per-user cap stops one account running away with it, a global cap
+    # stops many well-behaved accounts exhausting it collectively. Both are
+    # configurable, and 0 disables a limit.
+    app.state.limiter = RateLimiter(
+        per_user=int(os.getenv("PMIE_RATE_LIMIT_PER_USER", "10")),
+        per_user_window=float(os.getenv("PMIE_RATE_LIMIT_WINDOW_SECONDS", "3600")),
+        global_limit=int(os.getenv("PMIE_RATE_LIMIT_GLOBAL", "60")),
+        global_window=float(os.getenv("PMIE_RATE_LIMIT_WINDOW_SECONDS", "3600")),
+    )
 
     registry = AnalysisRegistry()
     app.state.registry = registry

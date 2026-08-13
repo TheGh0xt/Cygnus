@@ -89,6 +89,22 @@
         "title": "AnalysisResult",
         "type": "object"
       },
+      "CategoriesResponse": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/InterestCategory"
+            },
+            "title": "Categories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "categories"
+        ],
+        "title": "CategoriesResponse",
+        "type": "object"
+      },
       "CausalDriver": {
         "enum": [
           "WHALE_ACTIVITY",
@@ -138,6 +154,30 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HealthResponse": {
+        "properties": {
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
       "HistoricalContextMatch": {
         "properties": {
           "previous_market_id": {
@@ -165,6 +205,40 @@
         "title": "Impact",
         "type": "string"
       },
+      "InterestCategory": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "sort_order": {
+            "default": 0,
+            "title": "Sort Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "slug",
+          "label"
+        ],
+        "title": "InterestCategory",
+        "type": "object"
+      },
       "InterestsRequest": {
         "properties": {
           "categories": {
@@ -181,6 +255,22 @@
           "categories"
         ],
         "title": "InterestsRequest",
+        "type": "object"
+      },
+      "InterestsResponse": {
+        "properties": {
+          "interests": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Interests",
+            "type": "array"
+          }
+        },
+        "required": [
+          "interests"
+        ],
+        "title": "InterestsResponse",
         "type": "object"
       },
       "KeyDriver": {
@@ -258,6 +348,142 @@
         "title": "MarketAnalysisReport",
         "type": "object"
       },
+      "MeResponse": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "interests": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Interests",
+            "type": "array"
+          },
+          "is_grandfathered": {
+            "title": "Is Grandfathered",
+            "type": "boolean"
+          },
+          "is_invited": {
+            "title": "Is Invited",
+            "type": "boolean"
+          },
+          "onboarding_completed": {
+            "title": "Onboarding Completed",
+            "type": "boolean"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageSummary"
+          }
+        },
+        "required": [
+          "id",
+          "is_invited",
+          "is_grandfathered",
+          "onboarding_completed",
+          "interests",
+          "usage"
+        ],
+        "title": "MeResponse",
+        "type": "object"
+      },
+      "ProblemResponse": {
+        "description": "RFC 9457 problem+json.\n\nDeclared so the documented error shape matches what the API actually\nreturns; clients switch on `type`, never on `title` or `detail`.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instance"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
+        "title": "ProblemResponse",
+        "type": "object"
+      },
+      "UsageSummary": {
+        "properties": {
+          "analyses_this_month": {
+            "title": "Analyses This Month",
+            "type": "integer"
+          },
+          "enforced": {
+            "default": false,
+            "title": "Enforced",
+            "type": "boolean"
+          },
+          "free_monthly_allowance": {
+            "title": "Free Monthly Allowance",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "analyses_this_month",
+          "free_monthly_allowance"
+        ],
+        "title": "UsageSummary",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -309,6 +535,7 @@
   "paths": {
     "/v1/analyses": {
       "post": {
+        "description": "Starts a run and returns immediately with a stream URL.\n\nA full analysis takes 60-120 seconds across four stages, so the work\nhappens in the background and progress arrives over the SSE endpoint.",
         "operationId": "create_analysis_v1_analyses_post",
         "requestBody": {
           "content": {
@@ -331,6 +558,28 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Signed in but not invited to the alpha"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -340,9 +589,31 @@
               }
             },
             "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Rate limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
-        "summary": "Create Analysis"
+        "summary": "Start an analysis"
       }
     },
     "/v1/analyses/{analysis_id}": {
@@ -452,6 +723,28 @@
           "204": {
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Signed in but not invited to the alpha"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -461,29 +754,39 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
-        "summary": "Submit Feedback"
+        "summary": "Rate a report"
       }
     },
     "/v1/health": {
       "get": {
+        "description": "Answers as soon as the process is up. Public: load balancers cannot\nauthenticate.",
         "operationId": "health_v1_health_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Health V1 Health Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "Health"
+        "summary": "Liveness"
       }
     },
     "/v1/interests/categories": {
@@ -495,16 +798,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Interest Categories V1 Interests Categories Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/CategoriesResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
-        "summary": "Interest Categories"
+        "summary": "Selectable market categories"
       }
     },
     "/v1/me": {
@@ -516,16 +828,47 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Me V1 Me Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/MeResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Signed in but not invited to the alpha"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
-        "summary": "Me"
+        "summary": "The signed-in user"
       }
     },
     "/v1/me/interests": {
@@ -546,26 +889,58 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Set Interests V1 Me Interests Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/InterestsResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Signed in but not invited to the alpha"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ProblemResponse"
                 }
-              }
+              },
+              "application/problem+json": {}
             },
-            "description": "Validation Error"
+            "description": "Fewer than 3, more than 5, or unknown categories"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
-        "summary": "Set Interests"
+        "summary": "Choose 3-5 interest categories"
       }
     },
     "/v1/ready": {
@@ -576,16 +951,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Ready V1 Ready Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "Ready"
+        "summary": "Readiness"
       }
     }
   }

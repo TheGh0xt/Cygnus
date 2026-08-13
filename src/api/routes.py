@@ -13,28 +13,75 @@ from .models import (
     AnalysisCreated,
     AnalysisRequest,
     AnalysisResult,
+    CategoriesResponse,
     FeedbackRequest,
+    HealthResponse,
     InterestsRequest,
+    InterestsResponse,
+    MeResponse,
+    ProblemResponse,
+    UsageSummary,
     extract_slug,
 )
+from .ratelimit import RateLimitExceeded
+
+# Every failure path returns problem+json. Declaring it here means /docs shows
+# the real error shape instead of FastAPI's default validation schema.
+PROBLEM = {
+    "model": ProblemResponse,
+    "content": {"application/problem+json": {}},
+}
+_AUTH_ERRORS = {
+    401: {"description": "Not signed in, or the token failed verification", **PROBLEM},
+    403: {"description": "Signed in but not invited to the alpha", **PROBLEM},
+    503: {"description": "A dependency is unavailable", **PROBLEM},
+}
 
 router = APIRouter(prefix="/v1")
 
 
-@router.get("/health")
+@router.get("/health", response_model=HealthResponse, summary="Liveness")
 async def health() -> dict:
+    """Answers as soon as the process is up. Public: load balancers cannot
+    authenticate."""
     return {"status": "ok", "service": "cygnus"}
 
 
-@router.get("/ready")
+@router.get("/ready", response_model=HealthResponse, summary="Readiness")
 async def ready() -> dict:
     return {"status": "ready"}
 
 
-@router.post("/analyses", status_code=201, response_model=AnalysisCreated)
+@router.post(
+    "/analyses",
+    status_code=201,
+    response_model=AnalysisCreated,
+    summary="Start an analysis",
+    responses={
+        **_AUTH_ERRORS,
+        429: {"description": "Rate limit exceeded", **PROBLEM},
+    },
+)
 async def create_analysis(body: AnalysisRequest, request: Request):
+    """Starts a run and returns immediately with a stream URL.
+
+    A full analysis takes 60-120 seconds across four stages, so the work
+    happens in the background and progress arrives over the SSE endpoint.
+    """
     user = current_user(request)
     require_invited(request, user)
+
+    # After the invite check, so an uninvited caller is told that rather than
+    # being rate limited, and before any work starts — this endpoint is the
+    # expensive one and the limit exists to protect the model budget.
+    try:
+        request.app.state.limiter.check(user.id)
+    except RateLimitExceeded as exc:
+        raise PmieError(
+            ErrorType.RATE_LIMITED,
+            f"Too many analyses. Try again in {exc.retry_after} seconds.",
+            status=429,
+        ) from exc
 
     registry = request.app.state.registry
     pipeline = request.app.state.pipeline
@@ -111,7 +158,12 @@ async def stream_analysis(analysis_id: str, request: Request):
     )
 
 
-@router.get("/me")
+@router.get(
+    "/me",
+    response_model=MeResponse,
+    summary="The signed-in user",
+    responses=_AUTH_ERRORS,
+)
 async def me(request: Request) -> dict:
     """The caller's profile, interests and usage.
 
@@ -147,17 +199,19 @@ async def me(request: Request) -> dict:
         "is_grandfathered": profile.is_grandfathered,
         "onboarding_completed": profile.onboarding_completed_at is not None,
         "interests": interests,
-        "usage": {
-            "analyses_this_month": used,
-            "free_monthly_allowance": FREE_MONTHLY_ANALYSES,
-            # Reported, not enforced. Pricing is gated behind a published
-            # accuracy record, so today this only tells a user where they are.
-            "enforced": False,
-        },
+        "usage": UsageSummary(
+            analyses_this_month=used,
+            free_monthly_allowance=FREE_MONTHLY_ANALYSES,
+        ),
     }
 
 
-@router.get("/interests/categories")
+@router.get(
+    "/interests/categories",
+    response_model=CategoriesResponse,
+    summary="Selectable market categories",
+    responses={503: _AUTH_ERRORS[503]},
+)
 async def interest_categories(request: Request) -> dict:
     """The selectable categories.
 
@@ -177,7 +231,18 @@ async def interest_categories(request: Request) -> dict:
         ) from exc
 
 
-@router.put("/me/interests")
+@router.put(
+    "/me/interests",
+    response_model=InterestsResponse,
+    summary="Choose 3-5 interest categories",
+    responses={
+        **_AUTH_ERRORS,
+        422: {
+            "description": "Fewer than 3, more than 5, or unknown categories",
+            **PROBLEM,
+        },
+    },
+)
 async def set_interests(body: InterestsRequest, request: Request) -> dict:
     user = current_user(request)
     accounts = request.app.state.accounts
@@ -188,7 +253,12 @@ async def set_interests(body: InterestsRequest, request: Request) -> dict:
     return {"interests": saved}
 
 
-@router.post("/analyses/{analysis_id}/feedback", status_code=204)
+@router.post(
+    "/analyses/{analysis_id}/feedback",
+    status_code=204,
+    summary="Rate a report",
+    responses=_AUTH_ERRORS,
+)
 async def submit_feedback(
     analysis_id: str, body: FeedbackRequest, request: Request
 ) -> None:
