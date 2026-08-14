@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
+from ..config import sagittarius_url, warm_sagittarius
 from ..evaluation.worker import SagittariusPriceFetcher
 from ..memory import build_memory_store
 from .accounts import Accounts
@@ -38,6 +39,10 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
         """
         if app.state.accounts.configured:
             app.state.write_access = run_startup_checks(app.state.accounts)
+        # Wake Sagittarius now so the first real analysis is not the request
+        # that pays for its cold start — that is what produced a report built
+        # entirely from news, with no market data in it.
+        warm_sagittarius()
         yield
 
     app = FastAPI(
@@ -51,9 +56,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     # instance must not keep this on a container filesystem that is wiped
     # on restart — the observed price in each row cannot be recreated.
     store = build_memory_store(db_path)
-    fetcher = SagittariusPriceFetcher(
-        os.getenv("SAGITTARIUS_MCP_URL", "http://localhost:8080/mcp")
-    )
+    fetcher = SagittariusPriceFetcher(sagittarius_url())
     # Persistence runs in the pipeline, not as an ADK after-agent callback:
     # that callback cannot see the analyst's output_key write, because
     # CallbackContext.state is session state plus the callback's own empty

@@ -1,9 +1,8 @@
-import os
 
 from google.adk.agents.llm_agent import LlmAgent
-from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
 from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
 
+from ..config import sagittarius_connection_params
 from ..prompts.events import SYSTEM_PROMPT
 
 
@@ -18,9 +17,7 @@ def make_market_event_agent(name: str = "market_event_agent") -> LlmAgent:
         instruction=SYSTEM_PROMPT,
         tools=[
             McpToolset(
-                connection_params=StreamableHTTPConnectionParams(
-                    url=os.getenv("SAGITTARIUS_MCP_URL", "http://localhost:8080/mcp")
-                ),
+                connection_params=sagittarius_connection_params(),
                 tool_filter=["get_event_by_slug", "get_event_by_id"],
             ),
         ],

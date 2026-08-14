@@ -21,9 +21,17 @@ from ..schemas.report import MarketAnalysisReport
 
 logger = logging.getLogger("cygnus.api.persistence")
 
+
 # The price fetch runs in a worker thread: SagittariusPriceFetcher calls
 # asyncio.run(), which raises inside the API's running event loop.
-_PRICE_TIMEOUT_SECONDS = 30
+#
+# The budget has to outlast a Sagittarius cold start. At 30s it did not, so
+# every report was stored with a null price — permanently unscoreable, since
+# the observed price cannot be recovered afterwards.
+def _price_timeout() -> float:
+    from ..config import sagittarius_timeout
+
+    return sagittarius_timeout()
 
 
 class ReportPersistence:
@@ -52,7 +60,7 @@ class ReportPersistence:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 return pool.submit(
                     self._price_fetcher.current_probability, slug
-                ).result(timeout=_PRICE_TIMEOUT_SECONDS)
+                ).result(timeout=_price_timeout())
         except Exception:
             # Degraded-but-successful: store the report anyway. A null price
             # costs one unscoreable row; dropping the report loses it forever.
