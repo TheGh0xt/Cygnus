@@ -104,8 +104,23 @@ async def create_analysis(body: AnalysisRequest, request: Request):
 
     registry = request.app.state.registry
     pipeline = request.app.state.pipeline
-    record = registry.create(body.query)
     slug = extract_slug(body.query, body.slug)
+    if not slug:
+        # Reject before any work starts. Without a slug the retrieval stages
+        # have nothing to look up, and the analyst — correctly — produces an
+        # "I had no market data" report. That costs four model calls and a
+        # minute of the user's time to say what we could have said instantly,
+        # and it stores a row that can never be scored.
+        raise PmieError(
+            ErrorType.INVALID_REQUEST,
+            "Could not identify a Polymarket market in that request. Include "
+            "the event slug or its full URL — for example "
+            "'why is world-cup-winner moving?' or "
+            "'https://polymarket.com/event/world-cup-winner'.",
+            status=422,
+        )
+
+    record = registry.create(body.query)
 
     # Keep a reference: a bare create_task can be garbage-collected mid-run,
     # which would silently strand the analysis in "running".
