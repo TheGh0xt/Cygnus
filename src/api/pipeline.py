@@ -72,11 +72,13 @@ class AnalysisPipeline:
         runner,
         user_id: str = "pmie",
         accounts=None,
+        persistence=None,
     ):
         self._registry = registry
         self._runner = runner
         self._user_id = user_id
         self._accounts = accounts
+        self._persistence = persistence
 
     async def run(
         self,
@@ -94,7 +96,8 @@ class AnalysisPipeline:
                 app_name=APP_NAME,
                 user_id=self._user_id,
                 session_id=analysis_id,
-                # The persistence callback reads this back out of state.
+                # Kept for the evaluation worker's benefit and for anyone
+                # inspecting a session; persistence no longer reads it.
                 state={"event_slug": slug},
             )
             message = types.Content(role="user", parts=[types.Part(text=query)])
@@ -128,6 +131,22 @@ class AnalysisPipeline:
 
             self._registry.mark_completed(analysis_id, final)
             outcome = "completed"
+
+            # Persist here, where the report demonstrably exists.
+            #
+            # This used to live in the analyst's after_agent_callback, reading
+            # market_analysis_report out of CallbackContext.state. That state
+            # is session state plus the callback's *own* (empty) delta, so it
+            # only contains the analyst's output_key write once ADK has
+            # committed that event to the session — and in a real run it has
+            # not yet. The callback saw nothing, returned quietly, and every
+            # completed analysis was discarded while reporting success.
+            #
+            # The pipeline accumulates state deltas from the events themselves,
+            # so by this line the report is in hand. Persisting here removes
+            # the dependency on ADK's internal ordering entirely.
+            self._persist(final, slug)
+
             self._registry.publish(analysis_id, StageEvent("report", None, final))
         except Exception as exc:
             logger.exception("analysis %s failed", analysis_id)
@@ -150,6 +169,28 @@ class AnalysisPipeline:
                     event_slug=slug or None,
                     duration_ms=int((time.monotonic() - started) * 1000),
                 )
+
+    def _persist(self, report: dict, slug: str) -> None:
+        """Store a completed report with the price observed right now.
+
+        Never raises into the run. The user has already waited a minute and a
+        half for this report; failing their request would lose the analysis as
+        well as the row. But the failure is logged at CRITICAL, because the
+        observed price cannot be reconstructed afterwards and without it the
+        report can never be scored.
+        """
+        if self._persistence is None:
+            return
+        try:
+            self._persistence.save(report, slug)
+        except Exception:
+            logger.critical(
+                "REPORT LOST — analysis for %s completed but could not be "
+                "persisted. This data cannot be recreated; the evaluation "
+                "engine will never score it.",
+                slug or "<unknown slug>",
+                exc_info=True,
+            )
 
     async def _report_from_session(self, session_id: str) -> dict | None:
         """Re-read the persisted session state as a fallback."""

@@ -21,16 +21,13 @@ market_analyst_agent = LlmAgent(
 )
 
 
-def attach_persistence(store, price_fetcher) -> None:
-    """Install the memory-store callback on the analyst.
-
-    Called once at API startup rather than at import time, so tests and the
-    `adk web` dev flow can import this module without a database. Note this
-    mutates a module-level agent: calling it twice in one process replaces
-    the callback rather than stacking it.
-    """
-    from .callbacks import make_persist_report_callback
-
-    market_analyst_agent.after_agent_callback = make_persist_report_callback(
-        store, price_fetcher
-    )
+# NOTE: persistence used to be attached here as an after_agent_callback.
+# It never worked in a real run. ADK writes an agent's output_key onto the
+# event's state_delta, while CallbackContext.state is session state plus the
+# callback's own empty delta — so at the moment the callback fires, the
+# analyst's report is not in the state it can see. The callback found nothing,
+# returned quietly, and every completed analysis was discarded while the run
+# reported success.
+#
+# Persistence now happens in src/api/pipeline.py, which accumulates state
+# deltas from the events themselves and therefore has the report in hand.

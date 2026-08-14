@@ -2,7 +2,7 @@
 
 Deliberately in-memory: an analysis is a single request's work, and a
 restart losing in-flight runs is acceptable. Completed *reports* are
-durable — they go to the SQLite memory store (see agents/callbacks.py),
+durable — they go to the memory store (see api/persistence.py),
 which is the record that matters.
 """
 
