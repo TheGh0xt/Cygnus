@@ -45,6 +45,22 @@ class ReportPersistence:
             if isinstance(report, MarketAnalysisReport)
             else MarketAnalysisReport.model_validate(report)
         )
+
+        # A report with no market identifier can never be scored: the
+        # evaluation worker has nothing to fetch a later price for. Storing it
+        # would put a permanently unscoreable row into the data the accuracy
+        # record is computed from.
+        #
+        # This should be unreachable — the API rejects requests with no
+        # identifiable market before any work begins — but the cost of being
+        # wrong is silent pollution of the one dataset that matters.
+        if not validated.market_id and not slug:
+            logger.warning(
+                "not storing an unscoreable report: no market_id and no slug. "
+                "The analysis ran without market data."
+            )
+            return
+
         price = self._fetch_price(slug)
         self._store.save_report(validated, slug or "", price)
         logger.info(
