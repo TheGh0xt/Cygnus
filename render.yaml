@@ -41,6 +41,13 @@ services:
       - key: SAGITTARIUS_MCP_URL
         sync: false
 
+      # The ADK's MCP connect timeout defaults to 5 seconds. Sagittarius
+      # sleeps when idle on a free plan and takes ~50s to wake, so at the
+      # default every market-data stage fails and the analyst produces a
+      # confident report built only from news.
+      - key: SAGITTARIUS_TIMEOUT_SECONDS
+        value: "90"
+
       # Secrets: set these in Render's dashboard, never in this file.
       - key: GOOGLE_API_KEY
         sync: false

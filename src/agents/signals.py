@@ -1,9 +1,7 @@
-import os
-
 from google.adk.agents.llm_agent import LlmAgent
-from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
 from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
 
+from ..config import sagittarius_connection_params
 from ..prompts.signals import SYSTEM_PROMPT
 
 
@@ -18,9 +16,7 @@ def make_market_signal_agent(name: str = "market_signal_agent") -> LlmAgent:
         instruction=SYSTEM_PROMPT,
         tools=[
             McpToolset(
-                connection_params=StreamableHTTPConnectionParams(
-                    url=os.getenv("SAGITTARIUS_MCP_URL", "http://localhost:8080/mcp")
-                ),
+                connection_params=sagittarius_connection_params(),
                 tool_filter=["get_whale_activity", "get_market_snapshot"],
             ),
         ],
