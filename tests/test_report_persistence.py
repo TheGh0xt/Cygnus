@@ -128,3 +128,43 @@ async def test_price_is_fetched_even_inside_a_running_event_loop():
 
     assert len(store.saved) == 1
     assert store.saved[0][2] == 0.33, "price must survive the running loop"
+
+
+def test_a_store_failure_is_logged_as_lost_data(caplog):
+    """A completed report that cannot be stored is unrecoverable.
+
+    The price observed at this moment is the baseline the evaluation worker
+    scores against in 48 hours and cannot be reconstructed afterwards, so this
+    must be impossible to miss in a log.
+    """
+
+    class BrokenStore:
+        def save_report(self, *args, **kwargs):
+            raise RuntimeError("row-level security policy")
+
+    cb = make_persist_report_callback(BrokenStore(), FakeFetcher(0.5))
+    state = {
+        "event_slug": "world-cup-winner",
+        "market_analysis_report": _report().model_dump(),
+    }
+
+    with caplog.at_level("CRITICAL"):
+        cb(callback_context=FakeContext(state))
+
+    assert "REPORT LOST" in caplog.text
+    assert "world-cup-winner" in caplog.text
+
+
+def test_a_store_failure_does_not_fail_the_analysis():
+    # The user still gets their report. Raising here would lose the analysis
+    # as well as the row, which helps nobody.
+    class BrokenStore:
+        def save_report(self, *args, **kwargs):
+            raise RuntimeError("store down")
+
+    cb = make_persist_report_callback(BrokenStore(), FakeFetcher(0.5))
+    state = {
+        "event_slug": "x",
+        "market_analysis_report": _report().model_dump(),
+    }
+    assert cb(callback_context=FakeContext(state)) is None

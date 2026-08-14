@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
@@ -16,11 +17,31 @@ from .pipeline import AnalysisPipeline, build_runner
 from .ratelimit import RateLimiter
 from .registry import AnalysisRegistry
 from .routes import router
+from .selfcheck import run_startup_checks
 
 
 def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     configure_logging()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """Confirm this process can actually persist a report.
+
+        Runs at startup rather than on first use so a misconfiguration shows
+        up in the deploy log, instead of being discovered weeks later when the
+        accuracy record turns out to be empty.
+
+        Never fatal. Refusing to boot would take the whole API down over a
+        store problem, and analyses are still worth serving while it is fixed
+        — the check exists to make the failure impossible to miss, not to
+        decide the outcome.
+        """
+        if app.state.accounts.configured:
+            app.state.write_access = run_startup_checks(app.state.accounts)
+        yield
+
     app = FastAPI(
+        lifespan=lifespan,
         title="PMIE API",
         version="1.0.0",
         description="Causal explanations for Polymarket price moves.",
@@ -80,5 +101,6 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     async def handle_pmie_error(request: Request, exc: PmieError):
         return problem_response(exc, instance=str(request.url.path))
 
+    app.state.write_access = None
     app.include_router(router)
     return app

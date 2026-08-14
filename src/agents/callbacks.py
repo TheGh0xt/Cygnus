@@ -57,7 +57,29 @@ def make_persist_report_callback(store, price_fetcher) -> Callable:
 
         price = _fetch_price(price_fetcher, slug)
 
-        store.save_report(report, slug, price)
+        try:
+            store.save_report(report, slug, price)
+        except Exception:
+            # The loudest message in the codebase, and deliberately so. A
+            # completed analysis that cannot be stored is unrecoverable: the
+            # price observed at this moment is the baseline the evaluation
+            # worker scores against in 48 hours, and it cannot be reconstructed
+            # afterwards. Losing these silently is how a project arrives at
+            # launch with an empty accuracy record.
+            #
+            # The exception is not re-raised. The user still gets their report,
+            # and failing their request would not save the data — it would just
+            # lose the analysis too.
+            logger.critical(
+                "REPORT LOST — analysis for %s completed but could not be "
+                "persisted. This data cannot be recreated; the evaluation "
+                "engine will never score it. Check the report store "
+                "credentials and write access.",
+                slug or "<unknown slug>",
+                exc_info=True,
+            )
+            return None
+
         logger.info("persisted report for %s", slug or "<unknown slug>")
         return None
 

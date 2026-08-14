@@ -22,6 +22,7 @@ from .models import (
     InterestsResponse,
     MeResponse,
     ProblemResponse,
+    ReadyResponse,
     UsageSummary,
     extract_slug,
 )
@@ -51,9 +52,23 @@ async def health() -> dict:
     return {"status": "ok", "service": "cygnus"}
 
 
-@router.get("/ready", response_model=HealthResponse, summary="Readiness")
-async def ready() -> dict:
-    return {"status": "ready"}
+@router.get("/ready", response_model=ReadyResponse, summary="Readiness")
+async def ready(request: Request) -> dict:
+    """Reports whether this process can do its job, not merely that it is up.
+
+    Distinct from /health on purpose: a server that cannot persist reports
+    answers /health perfectly well while silently discarding the only data
+    the product's claims rest on.
+    """
+    check = getattr(request.app.state, "write_access", None)
+    return {
+        "status": "ready",
+        "service": "cygnus",
+        "checks": {
+            "report_store_writable": ("unknown" if check is None else check.status),
+            "detail": None if check is None else check.detail,
+        },
+    }
 
 
 @router.post(
