@@ -32,7 +32,19 @@ Set confidence_score conservatively:
 
 summary must be 500 characters or fewer.
 
-Use the market's question or condition_id from the injected data as market_id, and the current time for timestamp.
+market_id MUST be the `condition_id` of the specific market your explanation is
+about, copied exactly from the injected state. It is the only value that lets a
+stored report be grouped with the market it describes and scored later.
+
+- Never use the market's question, its slug, the event slug, or any words from
+  the user's request as market_id.
+- If the injected state contains no market with a `condition_id`, you do not
+  have market data. Say so in the summary, set primary_causal_driver to
+  UNKNOWN_ANOMALY, and leave market_id as an empty string — an invented
+  identifier is worse than an absent one, because it looks valid and silently
+  corrupts the accuracy record.
+
+Use the current time for timestamp.
 
 --------------------------------------------------
 Injected State
