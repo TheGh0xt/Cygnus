@@ -6,13 +6,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
-from ..agents.analyst import attach_persistence
 from ..evaluation.worker import SagittariusPriceFetcher
 from ..memory import build_memory_store
 from .accounts import Accounts
 from .auth import JwksCache
 from .errors import PmieError, problem_response
 from .logging import configure_logging, new_request_id, request_id_var
+from .persistence import ReportPersistence
 from .pipeline import AnalysisPipeline, build_runner
 from .ratelimit import RateLimiter
 from .registry import AnalysisRegistry
@@ -54,7 +54,11 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     fetcher = SagittariusPriceFetcher(
         os.getenv("SAGITTARIUS_MCP_URL", "http://localhost:8080/mcp")
     )
-    attach_persistence(store, fetcher)
+    # Persistence runs in the pipeline, not as an ADK after-agent callback:
+    # that callback cannot see the analyst's output_key write, because
+    # CallbackContext.state is session state plus the callback's own empty
+    # delta and ADK has not committed the analyst's event yet.
+    persistence = ReportPersistence(store, fetcher)
 
     accounts = Accounts()
     app.state.accounts = accounts
@@ -84,7 +88,10 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     app.state.registry = registry
     app.state.tasks = set()
     app.state.pipeline = AnalysisPipeline(
-        registry, build_runner(f"{db_path}.sessions"), accounts=accounts
+        registry,
+        build_runner(f"{db_path}.sessions"),
+        accounts=accounts,
+        persistence=persistence,
     )
 
     @app.middleware("http")
