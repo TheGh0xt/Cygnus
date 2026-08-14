@@ -73,6 +73,10 @@ class ReadyResponse(BaseModel):
     checks: ReadyChecks
 
 
+class EvaluationRunResponse(BaseModel):
+    evaluated: int
+
+
 class ProblemResponse(BaseModel):
     """RFC 9457 problem+json.
 

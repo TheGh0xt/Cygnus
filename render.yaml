@@ -58,6 +58,12 @@ services:
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
 
+      # Shared secret for the scheduled evaluation trigger. Without it the
+      # endpoint stays closed, so nothing ever scores a report and the
+      # accuracy record never starts.
+      - key: PMIE_CRON_SECRET
+        sync: false
+
       # PMIE_AUTH_DISABLED is deliberately absent. Authentication is on unless
       # explicitly switched off, and a deployed instance must never have it
       # off: an unauthenticated public endpoint would let anyone spend the

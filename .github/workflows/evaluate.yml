@@ -1,0 +1,62 @@
+name: Scheduled evaluation
+
+# Layer 5 scores each report against what the market actually did 48 hours
+# later. That only becomes an accuracy record if it runs on a cadence.
+#
+# GitHub Actions rather than a scheduler inside the service: on a free
+# container plan the service is suspended when idle, so an in-process
+# scheduler never fires, and platform cron is a paid feature. This costs
+# nothing, runs whether or not the service is awake, and the request itself
+# wakes it.
+
+on:
+  schedule:
+    # Every six hours. Reports come due at T+48h, so the worst case is six
+    # hours of lag on a two-day window — immaterial — while keeping the run
+    # count low enough that a cold start is never the dominant cost.
+    - cron: "0 */6 * * *"
+  # Manual trigger, for verifying the wiring without waiting for the cron.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two cycles must never run at once: both would read the same due reports
+  # and each write a confidence adjustment.
+  group: scheduled-evaluation
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    name: score due reports
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger an evaluation cycle
+        env:
+          CYGNUS_URL: ${{ secrets.CYGNUS_URL }}
+          CRON_SECRET: ${{ secrets.PMIE_CRON_SECRET }}
+        run: |
+          if [ -z "$CYGNUS_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::CYGNUS_URL and PMIE_CRON_SECRET must be set as repository secrets."
+            exit 1
+          fi
+
+          # --max-time is generous: the service may be asleep, and a cold
+          # start costs roughly 50 seconds before the cycle even begins.
+          response=$(curl -sS --max-time 300 -w '\n%{http_code}' \
+            -X POST "$CYGNUS_URL/v1/internal/evaluations/run" \
+            -H "x-cron-secret: $CRON_SECRET")
+
+          body=$(echo "$response" | sed '$d')
+          status=$(echo "$response" | tail -n1)
+
+          echo "status: $status"
+          echo "body:   $body"
+
+          if [ "$status" != "200" ]; then
+            echo "::error::Evaluation cycle failed with status $status. Reports remain due and will be retried on the next run."
+            exit 1
+          fi
+
+          echo "::notice::$body"
