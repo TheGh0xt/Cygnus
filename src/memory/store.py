@@ -34,6 +34,17 @@ class StoredReport:
     outcome: str | None  # "CONFIRMED" | "REVERSED" | None
 
 
+@dataclass
+class Checkpoint:
+    """One evaluation of a report at one horizon."""
+
+    horizon_hours: int
+    observed_price: float
+    outcome: str  # "CONFIRMED" | "REVERSED"
+    is_canonical: bool
+    evaluated_at: datetime
+
+
 class SqliteMemoryStore:
     def __init__(self, db_path: str | Path):
         # check_same_thread=False because the API opens this store once at
@@ -139,6 +150,115 @@ class SqliteMemoryStore:
                 ORDER BY created_at
                 """,
                 (market_id,),
+            ).fetchall()
+        return [self._to_stored(r) for r in rows]
+
+    def get_recorded_horizons(self, report_id: int) -> set[int]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT horizon_hours FROM report_evaluations WHERE report_id = ?",
+                (report_id,),
+            ).fetchall()
+        return {row["horizon_hours"] for row in rows}
+
+    def get_checkpoints(self, report_id: int) -> list[Checkpoint]:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM report_evaluations
+                WHERE report_id = ?
+                ORDER BY horizon_hours
+                """,
+                (report_id,),
+            ).fetchall()
+        return [
+            Checkpoint(
+                horizon_hours=row["horizon_hours"],
+                observed_price=row["observed_price"],
+                outcome=row["outcome"],
+                is_canonical=bool(row["is_canonical"]),
+                evaluated_at=datetime.fromisoformat(row["evaluated_at"]),
+            )
+            for row in rows
+        ]
+
+    def record_checkpoint(
+        self,
+        report_id: int,
+        horizon_hours: int,
+        observed_price: float,
+        outcome: str,
+        evaluated_at: datetime,
+        new_confidence: float | None = None,
+    ) -> None:
+        """Record one checkpoint, and adjust confidence only if canonical.
+
+        `new_confidence` is passed only for the canonical horizon. Earlier
+        checkpoints are observations: applying the confidence matrix at every
+        horizon would move scores four times as far as it was designed to, and
+        let a report that wobbles whipsaw its own confidence.
+        """
+        is_canonical = new_confidence is not None
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT OR IGNORE INTO report_evaluations
+                    (report_id, horizon_hours, observed_price, outcome,
+                     is_canonical, evaluated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    report_id,
+                    horizon_hours,
+                    observed_price,
+                    outcome,
+                    1 if is_canonical else 0,
+                    evaluated_at.isoformat(),
+                ),
+            )
+
+            if is_canonical:
+                row = self._conn.execute(
+                    "SELECT report_json FROM analysis_reports WHERE id = ?",
+                    (report_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"no stored report with id {report_id}")
+
+                report = MarketAnalysisReport.model_validate_json(row["report_json"])
+                updated = report.model_copy(update={"confidence_score": new_confidence})
+                self._conn.execute(
+                    """
+                    UPDATE analysis_reports
+                    SET confidence_score = ?, report_json = ?, evaluated_at = ?,
+                        outcome = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        new_confidence,
+                        updated.model_dump_json(),
+                        evaluated_at.isoformat(),
+                        outcome,
+                        report_id,
+                    ),
+                )
+
+            self._conn.commit()
+
+    def get_reports_awaiting_any_horizon(self, now: datetime) -> list[StoredReport]:
+        """Reports that still have at least one horizon left to evaluate.
+
+        A report leaves this set once its canonical checkpoint is recorded,
+        which is what `evaluated_at` marks.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM analysis_reports
+                WHERE evaluated_at IS NULL AND created_at <= ?
+                ORDER BY created_at
+                """,
+                (now.isoformat(),),
             ).fetchall()
         return [self._to_stored(r) for r in rows]
 

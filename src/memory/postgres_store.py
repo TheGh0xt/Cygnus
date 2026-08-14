@@ -26,11 +26,12 @@ import httpx
 
 from ..api.config import supabase_secret_key, supabase_url
 from ..schemas.report import MarketAnalysisReport
-from .store import StoredReport
+from .store import Checkpoint, StoredReport
 
 logger = logging.getLogger("cygnus.memory.postgres")
 
 _TABLE = "/analysis_reports"
+_CHECKPOINTS = "/report_evaluations"
 
 
 class MemoryStoreError(Exception):
@@ -151,6 +152,112 @@ class PostgresMemoryStore:
             _TABLE,
             params={
                 "market_id": f"eq.{market_id}",
+                "select": "*",
+                "order": "created_at.asc",
+            },
+        ).json()
+        return [self._to_stored(row) for row in rows]
+
+    def get_recorded_horizons(self, report_id: int) -> set[int]:
+        rows = self._request(
+            "GET",
+            _CHECKPOINTS,
+            params={"report_id": f"eq.{report_id}", "select": "horizon_hours"},
+        ).json()
+        return {row["horizon_hours"] for row in rows}
+
+    def get_checkpoints(self, report_id: int) -> list[Checkpoint]:
+        rows = self._request(
+            "GET",
+            _CHECKPOINTS,
+            params={
+                "report_id": f"eq.{report_id}",
+                "select": "*",
+                "order": "horizon_hours.asc",
+            },
+        ).json()
+        return [
+            Checkpoint(
+                horizon_hours=row["horizon_hours"],
+                observed_price=row["observed_price"],
+                outcome=row["outcome"],
+                is_canonical=bool(row["is_canonical"]),
+                evaluated_at=_parse_ts(row["evaluated_at"]),
+            )
+            for row in rows
+        ]
+
+    def record_checkpoint(
+        self,
+        report_id: int,
+        horizon_hours: int,
+        observed_price: float,
+        outcome: str,
+        evaluated_at: datetime,
+        new_confidence: float | None = None,
+    ) -> None:
+        """Record one checkpoint, adjusting confidence only if canonical.
+
+        `new_confidence` is passed only for the canonical horizon. Applying
+        the confidence matrix at every horizon would move scores four times as
+        far as it was designed to and let a wobbling report whipsaw itself.
+        """
+        is_canonical = new_confidence is not None
+
+        self._request(
+            "POST",
+            _CHECKPOINTS,
+            # The unique constraint on (report_id, horizon_hours) makes the
+            # cycle idempotent; ignoring the duplicate keeps a re-run harmless.
+            headers={"prefer": "resolution=ignore-duplicates"},
+            json={
+                "report_id": report_id,
+                "horizon_hours": horizon_hours,
+                "observed_price": observed_price,
+                "outcome": outcome,
+                "is_canonical": is_canonical,
+                "evaluated_at": evaluated_at.isoformat(),
+            },
+        )
+
+        if not is_canonical:
+            return
+
+        rows = self._request(
+            "GET",
+            _TABLE,
+            params={"id": f"eq.{report_id}", "select": "report_json", "limit": 1},
+        ).json()
+        if not rows:
+            raise KeyError(f"no stored report with id {report_id}")
+
+        report = MarketAnalysisReport.model_validate(rows[0]["report_json"])
+        updated = report.model_copy(update={"confidence_score": new_confidence})
+
+        self._request(
+            "PATCH",
+            _TABLE,
+            params={"id": f"eq.{report_id}"},
+            json={
+                "confidence_score": new_confidence,
+                "report_json": updated.model_dump(mode="json"),
+                "evaluated_at": evaluated_at.isoformat(),
+                "outcome": outcome,
+            },
+        )
+
+    def get_reports_awaiting_any_horizon(self, now: datetime) -> list[StoredReport]:
+        """Reports with at least one horizon left to evaluate.
+
+        A report leaves this set once its canonical checkpoint lands, which is
+        what evaluated_at marks.
+        """
+        rows = self._request(
+            "GET",
+            _TABLE,
+            params={
+                "evaluated_at": "is.null",
+                "created_at": f"lte.{now.isoformat()}",
                 "select": "*",
                 "order": "created_at.asc",
             },

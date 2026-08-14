@@ -14,16 +14,37 @@ Run as a cron job:  python -m src.evaluation.worker --db pmie_memory.db
 import argparse
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from ..memory import build_memory_store
-from ..memory.store import SqliteMemoryStore
 from ..schemas.report import MarketAnalysisReport
 
 CONFIDENCE_INCREMENT = 0.05
 CONFIDENCE_DECREMENT = 0.10
 REVERSAL_TOLERANCE = 0.02  # price band within which a move counts as held
+
+# Escalating checkpoints, in hours.
+#
+# A single check at T+48h answers "was it right" and nothing else. Four
+# checkpoints answer how durable the explanation was: "held at 12h, held at
+# 18h, reversed by 48h" and "wrong from the start" are different results that
+# one checkpoint records identically. It also accumulates data roughly four
+# times faster, and the accuracy record is gated on wall-clock time.
+EVALUATION_HORIZONS = (12, 18, 24, 48)
+
+# The horizon the published accuracy record is computed from, and the only one
+# that adjusts a report's confidence.
+#
+# Confidence must move once. The +0.05 / -0.10 matrix was designed for a
+# single application; running it at every horizon would swing scores four
+# times as far and let a report that wobbles whipsaw its own confidence.
+# Earlier checkpoints are observations, deliberately not score changes.
+CANONICAL_HORIZON = 48
+
+# Prediction markets are noisy intraday, so a 12h checkpoint will disagree
+# with the 48h one fairly often. That disagreement is data about durability,
+# not a defect — which is exactly why 48h alone is authoritative.
 
 
 def _extract_probability_from_tool_result(result: object) -> float | None:
@@ -99,41 +120,70 @@ class PriceFetcher(Protocol):
     def current_probability(self, market_slug: str) -> float | None: ...
 
 
+def due_horizons(
+    created_at: datetime,
+    now: datetime,
+    already_recorded: set[int],
+    horizons: tuple[int, ...] = EVALUATION_HORIZONS,
+) -> list[int]:
+    """Horizons that have elapsed for this report and are not yet recorded.
+
+    Pure, so the scheduling rule is testable without a store or a clock.
+    """
+    return [
+        horizon
+        for horizon in horizons
+        if horizon not in already_recorded
+        and now - created_at >= timedelta(hours=horizon)
+    ]
+
+
 def run_evaluation_cycle(
-    store: SqliteMemoryStore,
+    store,
     prices: PriceFetcher,
     now: datetime | None = None,
 ) -> int:
-    """Evaluates every due report; returns the number evaluated.
+    """Score every checkpoint that has come due; returns how many were scored.
 
-    Reports whose current price cannot be fetched are left due for the next
-    cycle rather than being guessed at.
+    Reports whose current price cannot be fetched are left for the next cycle
+    rather than being guessed at, and a report with no observation price is
+    skipped permanently — there is no baseline to score it against.
     """
     now = now or datetime.now(tz=UTC)
-    evaluated = 0
+    scored = 0
 
-    for stored in store.get_reports_due_for_evaluation(now):
+    for stored in store.get_reports_awaiting_any_horizon(now):
         if stored.price_at_report is None:
-            # Persisted without an observation price because the price fetch
-            # failed at report time. There is no baseline to score against and
-            # one can never be reconstructed, so skip it permanently rather
-            # than scoring it against a guess.
+            # Persisted without a price because the fetch failed at report
+            # time. That baseline cannot be reconstructed, so the report is
+            # permanently unscoreable.
+            continue
+
+        pending = due_horizons(
+            stored.created_at, now, store.get_recorded_horizons(stored.id)
+        )
+        if not pending:
             continue
 
         current = prices.current_probability(stored.market_slug)
         if current is None:
             continue
 
-        result = evaluate_report(stored.report, stored.price_at_report, current)
-        store.record_evaluation(
-            stored.id,
-            new_confidence=result.new_confidence,
-            outcome=result.outcome,
-            evaluated_at=now,
-        )
-        evaluated += 1
+        for horizon in pending:
+            result = evaluate_report(stored.report, stored.price_at_report, current)
+            is_canonical = horizon == CANONICAL_HORIZON
+            store.record_checkpoint(
+                report_id=stored.id,
+                horizon_hours=horizon,
+                observed_price=current,
+                outcome=result.outcome,
+                evaluated_at=now,
+                # Only the canonical horizon moves the score.
+                new_confidence=result.new_confidence if is_canonical else None,
+            )
+            scored += 1
 
-    return evaluated
+    return scored
 
 
 class SagittariusPriceFetcher:

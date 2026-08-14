@@ -133,10 +133,12 @@ class TestRunEvaluationCycle:
 
         count = run_evaluation_cycle(store, FakeFetcher({"slug-a": 0.70}), now=later)
 
-        assert count == 1
-        assert store.get_reports_due_for_evaluation(later) == []
+        # A 49-hour-old report has passed every horizon, so all four are
+        # scored in one cycle.
+        assert count == 4
         stored = store.get_history_for_market("0xabc")[0]
         assert stored.outcome == "CONFIRMED"
+        # Confidence moved exactly once despite four checkpoints.
         assert stored.report.confidence_score == pytest.approx(0.85)
 
     def test_reports_stored_without_a_price_are_skipped(self, store):
