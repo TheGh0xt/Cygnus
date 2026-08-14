@@ -92,3 +92,32 @@ def test_history_is_per_market_and_oldest_first(store):
     history = store.get_history_for_market("0xaaa")
     assert [s.price_at_report for s in history] == [0.5, 0.6]
     assert all(s.report.market_id == "0xaaa" for s in history)
+
+
+def test_store_is_usable_from_another_thread(tmp_path):
+    """The API opens the store at startup and uses it from request handlers.
+
+    Those run on different threads, and sqlite3 rejects cross-thread use by
+    default. That surfaced as a 500 on the evaluation endpoint with
+    "SQLite objects created in a thread can only be used in that same thread",
+    which would have broken every local run while production (Postgres) looked
+    fine.
+    """
+    import threading
+
+    store = SqliteMemoryStore(tmp_path / "threaded.db")
+    store.save_report(make_report(), "slug", 0.5, created_at=NOW)
+
+    results: list[object] = []
+
+    def read_from_another_thread():
+        try:
+            results.append(len(store.get_history_for_market("0xabc")))
+        except Exception as exc:  # noqa: BLE001 — the assertion is the point
+            results.append(exc)
+
+    thread = threading.Thread(target=read_from_another_thread)
+    thread.start()
+    thread.join()
+
+    assert results == [1], f"cross-thread read failed: {results}"

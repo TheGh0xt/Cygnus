@@ -12,6 +12,7 @@ from ..memory import build_memory_store
 from .accounts import Accounts
 from .auth import JwksCache
 from .errors import PmieError, problem_response
+from .evaluation_routes import router as evaluation_router
 from .logging import configure_logging, new_request_id, request_id_var
 from .persistence import ReportPersistence
 from .pipeline import AnalysisPipeline, build_runner
@@ -63,6 +64,11 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     # delta and ADK has not committed the analyst's event yet.
     persistence = ReportPersistence(store, fetcher)
 
+    # Held on app state so the scheduled evaluation endpoint can reuse the
+    # same store and price fetcher rather than constructing its own.
+    app.state.memory_store = store
+    app.state.price_fetcher = fetcher
+
     accounts = Accounts()
     app.state.accounts = accounts
     app.state.jwks = JwksCache()
@@ -113,4 +119,5 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
 
     app.state.write_access = None
     app.include_router(router)
+    app.include_router(evaluation_router)
     return app
