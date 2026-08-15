@@ -19,6 +19,7 @@ mutates the record the product's claims rest on.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import os
@@ -60,10 +61,19 @@ def _authorise(request: Request) -> None:
 async def run_evaluations(request: Request) -> dict:
     """Score every report that has come due.
 
-    Runs synchronously. Each due report costs one Sagittarius call, and at
-    current volumes a cycle is seconds; if the backlog ever grows past what a
-    request can finish, this moves to a background task with the response
-    reporting only that the run started.
+    The cycle runs to completion before responding. Each due report costs one
+    Sagittarius call, and at current volumes a cycle is seconds; if the backlog
+    ever grows past what a request can finish, this moves to a background task
+    with the response reporting only that the run started.
+
+    It runs in a worker thread rather than on the event loop. The cycle is
+    synchronous and its price fetcher calls asyncio.run(), which raises
+    RuntimeError if a loop is already running in that thread -- and raises it
+    before the coroutine body executes, so the fetcher's own degraded path
+    never gets the chance to turn the failure into "no price observed". The
+    cycle also blocks on HTTP to both the report store and Sagittarius, so
+    keeping it off the loop stops one scoring run from stalling every other
+    request for its duration.
     """
     _authorise(request)
 
@@ -78,7 +88,7 @@ async def run_evaluations(request: Request) -> dict:
         )
 
     try:
-        evaluated = run_evaluation_cycle(store, prices)
+        evaluated = await asyncio.to_thread(run_evaluation_cycle, store, prices)
     except Exception as exc:
         # A failed cycle must be visible. Reports stay due and are retried on
         # the next run, so the cost of a failure is delay, not lost data.
