@@ -9,12 +9,15 @@ It spends Sagittarius calls and rewrites the scores the product's claims rest
 on, so it must never be reachable without the secret.
 """
 
+import asyncio
 import os
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
+from src.schemas.report import MarketAnalysisReport
 
 SECRET = "a-long-shared-secret-value"
 
@@ -84,6 +87,59 @@ class TestCycle:
         )
         assert response.status_code == 500
         assert "remain due" in response.json()["detail"]
+
+
+class BlockingFetcher:
+    """Mirrors SagittariusPriceFetcher: a sync method wrapping asyncio.run().
+
+    The fake keeps the asyncio.run() wrapper deliberately. The defect this
+    guards against lives in that wrapper meeting a running event loop, not in
+    the network call underneath it, so a fake that simply returns a float
+    cannot reproduce it.
+    """
+
+    def __init__(self, price: float):
+        self.price = price
+
+    def current_probability(self, market_slug: str) -> float | None:
+        return asyncio.run(self._fetch())
+
+    async def _fetch(self) -> float:
+        return self.price
+
+
+class TestDueReportIsActuallyScored:
+    def test_a_due_report_scores_through_the_route(self, client):
+        # Regression: the cycle is synchronous and its price fetcher calls
+        # asyncio.run(), but the route awaited nothing and ran it directly on
+        # the event loop, where asyncio.run() raises RuntimeError before the
+        # coroutine body executes. Every cycle with a due report 500'd, while
+        # cycles with nothing due passed -- so the endpoint looked healthy
+        # until the first horizon elapsed, then failed on every run after.
+        app = client.app
+        store = app.state.memory_store
+        store.save_report(
+            MarketAnalysisReport(
+                market_id="0xabc",
+                timestamp=datetime.now(tz=UTC),
+                summary="whale accumulation",
+                primary_causal_driver="WHALE_ACTIVITY",
+                confidence_score=0.80,
+                key_drivers=[],
+            ),
+            "ballon-dor-winner-2026",
+            0.50,
+            created_at=datetime.now(tz=UTC) - timedelta(hours=13),
+        )
+        app.state.price_fetcher = BlockingFetcher(0.80)
+
+        response = client.post(
+            "/v1/internal/evaluations/run", headers={"x-cron-secret": SECRET}
+        )
+
+        assert response.status_code == 200
+        # 13 hours old: the 12h checkpoint has elapsed, the rest have not.
+        assert response.json()["evaluated"] == 1
 
 
 class TestExposure:
