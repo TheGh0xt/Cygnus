@@ -135,7 +135,7 @@ class TestRunEvaluationCycle:
 
         # A 49-hour-old report has passed every horizon, so all four are
         # scored in one cycle.
-        assert count == 4
+        assert count.scored == 4
         stored = store.get_history_for_market("0xabc")[0]
         assert stored.outcome == "CONFIRMED"
         # Confidence moved exactly once despite four checkpoints.
@@ -151,7 +151,7 @@ class TestRunEvaluationCycle:
 
         count = run_evaluation_cycle(store, FakeFetcher({"slug-a": 0.70}), now=later)
 
-        assert count == 0
+        assert count.scored == 0
 
     def test_unfetchable_markets_stay_due(self, store):
         store.save_report(make_report(0.80), "slug-gone", 0.58, created_at=NOW)
@@ -159,7 +159,7 @@ class TestRunEvaluationCycle:
 
         count = run_evaluation_cycle(store, FakeFetcher({}), now=later)
 
-        assert count == 0
+        assert count.scored == 0
         assert len(store.get_reports_due_for_evaluation(later)) == 1
 
     def test_young_reports_untouched(self, store):
@@ -169,4 +169,67 @@ class TestRunEvaluationCycle:
             store, FakeFetcher({"slug-a": 0.70}), now=NOW + timedelta(hours=1)
         )
 
-        assert count == 0
+        assert count.scored == 0
+
+
+class TestACycleThatScoredNothingSaysWhy:
+    """A quiet cycle and a broken one must not look identical.
+
+    Both score zero. Reported as a bare count they are the same number, so a
+    price source that has been unreachable for days reads exactly like a
+    weekend with nothing due -- which is how five consecutive green runs
+    wrote zero checkpoints without anyone noticing.
+    """
+
+    @pytest.fixture
+    def store(self, tmp_path):
+        return SqliteMemoryStore(tmp_path / "memory.db")
+
+    def test_nothing_due_is_a_quiet_cycle(self, store):
+        store.save_report(make_report(0.80), "slug-a", 0.58, created_at=NOW)
+
+        result = run_evaluation_cycle(
+            store, FakeFetcher({"slug-a": 0.70}), now=NOW + timedelta(hours=1)
+        )
+
+        assert result.scored == 0
+        assert result.reports_due == 0
+        assert result.price_unavailable == 0
+        # Nothing was asked of the price source, so nothing is wrong.
+        assert result.is_degraded is False
+
+    def test_an_unreachable_price_source_is_degraded_not_quiet(self, store):
+        store.save_report(make_report(0.80), "slug-a", 0.58, created_at=NOW)
+        later = NOW + timedelta(hours=49)
+
+        result = run_evaluation_cycle(store, FakeFetcher({}), now=later)
+
+        assert result.scored == 0
+        # The report came due and was asked for; the fetch is what failed.
+        assert result.reports_due == 1
+        assert result.price_unavailable == 1
+        assert result.is_degraded is True
+
+    def test_a_report_with_no_baseline_is_not_a_fetch_failure(self, store):
+        # Unscoreable forever, but the price source is healthy. Counting this
+        # as degraded would fire an alert that no deploy can ever clear.
+        store.save_report(make_report(0.80), "slug-a", None, created_at=NOW)
+        later = NOW + timedelta(hours=49)
+
+        result = run_evaluation_cycle(store, FakeFetcher({"slug-a": 0.70}), now=later)
+
+        assert result.scored == 0
+        assert result.price_unavailable == 0
+        assert result.is_degraded is False
+
+    def test_a_partial_outage_still_reports_what_it_scored(self, store):
+        store.save_report(make_report(0.80), "slug-a", 0.58, created_at=NOW)
+        store.save_report(make_report(0.80), "slug-gone", 0.58, created_at=NOW)
+        later = NOW + timedelta(hours=49)
+
+        result = run_evaluation_cycle(store, FakeFetcher({"slug-a": 0.70}), now=later)
+
+        assert result.scored == 4  # four horizons on the reachable market
+        assert result.reports_due == 2
+        assert result.price_unavailable == 1
+        assert result.is_degraded is True

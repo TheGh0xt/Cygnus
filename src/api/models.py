@@ -74,7 +74,17 @@ class ReadyResponse(BaseModel):
 
 
 class EvaluationRunResponse(BaseModel):
+    """The outcome of one scoring cycle.
+
+    `evaluated` alone cannot distinguish a cycle with nothing to do from one
+    that could reach nothing, so the caller gets the denominator and the
+    failure count too.
+    """
+
     evaluated: int
+    reports_due: int = 0
+    price_unavailable: int = 0
+    degraded: bool = False
 
 
 class ProblemResponse(BaseModel):

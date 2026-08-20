@@ -88,7 +88,7 @@ async def run_evaluations(request: Request) -> dict:
         )
 
     try:
-        evaluated = await asyncio.to_thread(run_evaluation_cycle, store, prices)
+        result = await asyncio.to_thread(run_evaluation_cycle, store, prices)
     except Exception as exc:
         # A failed cycle must be visible. Reports stay due and are retried on
         # the next run, so the cost of a failure is delay, not lost data.
@@ -99,5 +99,26 @@ async def run_evaluations(request: Request) -> dict:
             status=500,
         ) from exc
 
-    logger.info("evaluation cycle complete: %d report(s) scored", evaluated)
-    return {"evaluated": evaluated}
+    if result.is_degraded:
+        # Reported, not raised. The cycle did complete, and any report it did
+        # manage to score is real work that must not be rolled back by a 500.
+        # The caller decides what a degraded run means; what it must never do
+        # is look identical to a clean one.
+        logger.warning(
+            "evaluation cycle degraded: %d of %d due report(s) could not be priced",
+            result.price_unavailable,
+            result.reports_due,
+        )
+    else:
+        logger.info(
+            "evaluation cycle complete: %d checkpoint(s) across %d due report(s)",
+            result.scored,
+            result.reports_due,
+        )
+
+    return {
+        "evaluated": result.scored,
+        "reports_due": result.reports_due,
+        "price_unavailable": result.price_unavailable,
+        "degraded": result.is_degraded,
+    }
