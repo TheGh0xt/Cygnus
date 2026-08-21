@@ -26,7 +26,7 @@ import httpx
 
 from ..api.config import supabase_secret_key, supabase_url
 from ..schemas.report import MarketAnalysisReport
-from .store import Checkpoint, StoredReport
+from .store import Checkpoint, RecentAnalysis, StoredReport
 
 logger = logging.getLogger("cygnus.memory.postgres")
 
@@ -157,6 +157,30 @@ class PostgresMemoryStore:
             },
         ).json()
         return [self._to_stored(row) for row in rows]
+
+    def recent_analyses(self, since: datetime) -> list[RecentAnalysis]:
+        """Every analysis written since `since`, oldest first.
+
+        Selects only the two columns the generation cycle actually needs.
+        `select=*` here would pull every stored report's jsonb across the wire
+        on every cycle to answer a question about slugs and timestamps.
+        """
+        rows = self._request(
+            "GET",
+            _TABLE,
+            params={
+                "created_at": f"gte.{since.isoformat()}",
+                "select": "market_slug,created_at",
+                "order": "created_at.asc",
+            },
+        ).json()
+        return [
+            RecentAnalysis(
+                market_slug=row["market_slug"],
+                created_at=_parse_ts(row["created_at"]),
+            )
+            for row in rows
+        ]
 
     def get_recorded_horizons(self, report_id: int) -> set[int]:
         rows = self._request(

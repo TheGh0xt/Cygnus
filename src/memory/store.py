@@ -20,6 +20,17 @@ from ..schemas.report import MarketAnalysisReport
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Force a timestamp tz-aware.
+
+    Rows written through this module always carry an offset, but a naive one
+    from any other writer would compare wrong against the tz-aware "now" the
+    generation cycle uses — and the failure mode is a cooldown that silently
+    never fires, not an exception.
+    """
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
 @dataclass
 class StoredReport:
     id: int
@@ -32,6 +43,19 @@ class StoredReport:
     created_at: datetime
     evaluated_at: datetime | None
     outcome: str | None  # "CONFIRMED" | "REVERSED" | None
+
+
+@dataclass
+class RecentAnalysis:
+    """That a market was analysed, and when.
+
+    Deliberately not a StoredReport: the generation cycle only needs to know
+    what it has recently done, and decoding a full report to answer that would
+    parse every stored report on every cycle.
+    """
+
+    market_slug: str
+    created_at: datetime
 
 
 @dataclass
@@ -261,6 +285,36 @@ class SqliteMemoryStore:
                 (now.isoformat(),),
             ).fetchall()
         return [self._to_stored(r) for r in rows]
+
+    def recent_analyses(self, since: datetime) -> list[RecentAnalysis]:
+        """Every analysis written since `since`, oldest first.
+
+        Answers both of the generation cycle's questions about its own recent
+        behaviour — when each market was last analysed, and how many reports
+        have been written today — from one read. The arithmetic on top is pure
+        and lives in the selector.
+
+        Every occurrence is returned, not one row per market: re-analysing a
+        market that moves again is deliberate (ROADMAP 4.4 needs per-market
+        history), so the caller has to see repeats rather than a deduplicated
+        set.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT market_slug, created_at FROM analysis_reports
+                WHERE created_at >= ?
+                ORDER BY created_at
+                """,
+                (since.isoformat(),),
+            ).fetchall()
+        return [
+            RecentAnalysis(
+                market_slug=row["market_slug"],
+                created_at=_as_utc(datetime.fromisoformat(row["created_at"])),
+            )
+            for row in rows
+        ]
 
     @staticmethod
     def _to_stored(row: sqlite3.Row) -> StoredReport:
