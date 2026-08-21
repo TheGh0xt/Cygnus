@@ -13,6 +13,7 @@ import time
 from google.genai import types
 
 from .registry import AnalysisRegistry, StageEvent
+from .usage import TokenUsage, add_event_usage
 
 logger = logging.getLogger("cygnus.api.pipeline")
 
@@ -102,6 +103,7 @@ class AnalysisPipeline:
             )
             message = types.Content(role="user", parts=[types.Part(text=query)])
             state: dict = {}
+            usage = TokenUsage()
 
             async for event in self._runner.run_async(
                 user_id=self._user_id,
@@ -115,6 +117,7 @@ class AnalysisPipeline:
                         analysis_id, StageEvent("stage_started", stage, {})
                     )
                 state.update(_state_delta(event))
+                usage = add_event_usage(usage, event)
 
                 if event.is_final_response() and stage:
                     self._registry.publish(
@@ -158,6 +161,19 @@ class AnalysisPipeline:
             # Always terminate the stream, success or failure, or an SSE
             # client waits forever.
             self._registry.close(analysis_id)
+            duration_ms = int((time.monotonic() - started) * 1000)
+
+            # Logged unconditionally, including for generated analyses that
+            # have no profile. Those are exactly the runs whose cost needs
+            # watching — they are the ones nobody is sitting in front of.
+            logger.info(
+                "analysis %s %s in %dms (%s tokens)",
+                analysis_id,
+                outcome,
+                duration_ms,
+                usage.total_tokens or "unmeasured",
+            )
+
             if self._accounts is not None and profile_id:
                 # Recorded for every attempt. Only 'completed' rows count
                 # toward an allowance — a failed analysis must never consume
@@ -167,7 +183,8 @@ class AnalysisPipeline:
                     analysis_id=analysis_id,
                     outcome=outcome,
                     event_slug=slug or None,
-                    duration_ms=int((time.monotonic() - started) * 1000),
+                    duration_ms=duration_ms,
+                    tokens=usage,
                 )
 
     def _persist(self, report: dict, slug: str) -> None:
