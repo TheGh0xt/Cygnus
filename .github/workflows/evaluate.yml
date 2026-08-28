@@ -59,4 +59,14 @@ jobs:
             exit 1
           fi
 
+          # A 200 only means the cycle ran, not that it worked. When the price
+          # source is unreachable every report is skipped and the run still
+          # returns 200 with evaluated=0 -- which is exactly how this workflow
+          # stayed green for days while writing no checkpoints at all. A
+          # degraded cycle has to break the build, or nothing ever surfaces it.
+          if echo "$body" | grep -q '"degraded"[[:space:]]*:[[:space:]]*true'; then
+            echo "::error::Evaluation cycle ran but could not price its due reports. Check SAGITTARIUS_MCP_URL on the Cygnus service and that Sagittarius is reachable. Body: $body"
+            exit 1
+          fi
+
           echo "::notice::$body"

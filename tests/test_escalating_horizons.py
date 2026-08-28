@@ -125,8 +125,8 @@ class TestIdempotence:
         first = run_evaluation_cycle(store, fetcher, now=later)
         second = run_evaluation_cycle(store, fetcher, now=later)
 
-        assert first == 4
-        assert second == 0, "a re-run must not rescore recorded checkpoints"
+        assert first.scored == 4
+        assert second.scored == 0, "a re-run must not rescore recorded checkpoints"
 
     def test_confidence_is_not_moved_twice_by_a_rerun(self, store):
         store.save_report(make_report(0.80), "slug-a", 0.58, created_at=NOW)
@@ -205,5 +205,5 @@ class TestCostControl:
             store, FakeFetcher({}), now=NOW + timedelta(hours=49)
         )
 
-        assert count == 0
+        assert count.scored == 0
         assert store.get_recorded_horizons(report_id) == set()

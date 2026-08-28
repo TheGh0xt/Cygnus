@@ -13,12 +13,15 @@ Run as a cron job:  python -m src.evaluation.worker --db pmie_memory.db
 
 import argparse
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from ..memory import build_memory_store
 from ..schemas.report import MarketAnalysisReport
+
+logger = logging.getLogger("cygnus.evaluation")
 
 CONFIDENCE_INCREMENT = 0.05
 CONFIDENCE_DECREMENT = 0.10
@@ -138,25 +141,60 @@ def due_horizons(
     ]
 
 
+@dataclass(frozen=True)
+class CycleReport:
+    """What one evaluation cycle did, and whether it was able to do it.
+
+    A bare count cannot answer the only question that matters when the number
+    is zero: was there nothing to score, or could nothing be scored? Those are
+    a healthy cycle and a broken one, and they must not report identically.
+    """
+
+    scored: int
+    reports_due: int
+    price_unavailable: int
+
+    @property
+    def is_degraded(self) -> bool:
+        """True when a report came due and its price could not be fetched.
+
+        Deliberately not "scored == 0": a cycle with nothing due scores zero
+        and is perfectly healthy, while a cycle that scored some markets and
+        failed others is already telling us the price source is flaky.
+        """
+        return self.price_unavailable > 0
+
+
 def run_evaluation_cycle(
     store,
     prices: PriceFetcher,
     now: datetime | None = None,
-) -> int:
-    """Score every checkpoint that has come due; returns how many were scored.
+) -> CycleReport:
+    """Score every checkpoint that has come due.
 
     Reports whose current price cannot be fetched are left for the next cycle
     rather than being guessed at, and a report with no observation price is
     skipped permanently — there is no baseline to score it against.
+
+    Both skips are counted rather than silent. An unreachable price source
+    fails exactly like an idle weekend otherwise, which is how this cycle ran
+    green for days while writing nothing.
     """
     now = now or datetime.now(tz=UTC)
     scored = 0
+    reports_due = 0
+    price_unavailable = 0
 
     for stored in store.get_reports_awaiting_any_horizon(now):
         if stored.price_at_report is None:
             # Persisted without a price because the fetch failed at report
             # time. That baseline cannot be reconstructed, so the report is
-            # permanently unscoreable.
+            # permanently unscoreable. Not a fetch failure: counting it as one
+            # would raise an alarm that no amount of fixing could ever clear.
+            logger.warning(
+                "report %s has no price_at_report; permanently unscoreable",
+                stored.id,
+            )
             continue
 
         pending = due_horizons(
@@ -165,8 +203,20 @@ def run_evaluation_cycle(
         if not pending:
             continue
 
+        reports_due += 1
+
         current = prices.current_probability(stored.market_slug)
         if current is None:
+            # The report stays due and is retried next cycle. Left unrecorded
+            # this is invisible, and an outage that never resolves is invisible
+            # forever.
+            price_unavailable += 1
+            logger.warning(
+                "no current price for %r (report %s); %d horizon(s) stay due",
+                stored.market_slug,
+                stored.id,
+                len(pending),
+            )
             continue
 
         for horizon in pending:
@@ -183,7 +233,11 @@ def run_evaluation_cycle(
             )
             scored += 1
 
-    return scored
+    return CycleReport(
+        scored=scored,
+        reports_due=reports_due,
+        price_unavailable=price_unavailable,
+    )
 
 
 class SagittariusPriceFetcher:
@@ -221,7 +275,21 @@ class SagittariusPriceFetcher:
             # price observed": the caller leaves the report due and retries on
             # the next cycle rather than scoring it against missing data.
             # Narrowing this would let a new transport error abort a whole
-            # evaluation run. Structured logging arrives with Phase 1.9.
+            # evaluation run.
+            #
+            # It is logged with the URL it tried, because the failure this
+            # path most often hides is a misconfigured SAGITTARIUS_MCP_URL --
+            # unset, it silently defaults to localhost, which resolves to
+            # nothing inside a container and refuses instantly. Swallowed
+            # without a trace, that is indistinguishable from a market that
+            # has simply gone away, and it stays that way for as long as
+            # nobody thinks to look. The URL carries no credentials.
+            logger.warning(
+                "price fetch failed for %r via %s",
+                market_slug,
+                self.mcp_url,
+                exc_info=True,
+            )
             return None
 
 
@@ -238,8 +306,23 @@ def main() -> None:
     fetcher = SagittariusPriceFetcher(
         os.getenv("SAGITTARIUS_MCP_URL", "http://localhost:8080/mcp")
     )
-    count = run_evaluation_cycle(store, fetcher)
-    print(f"evaluated {count} report(s)")
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+    )
+
+    result = run_evaluation_cycle(store, fetcher)
+    print(
+        f"evaluated {result.scored} checkpoint(s) "
+        f"across {result.reports_due} due report(s)"
+    )
+    if result.is_degraded:
+        # Non-zero exit so a cron wrapper treats an unreachable price source
+        # as the failure it is rather than a quiet run.
+        print(
+            f"WARNING: {result.price_unavailable} report(s) could not be priced "
+            f"via {fetcher.mcp_url}"
+        )
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

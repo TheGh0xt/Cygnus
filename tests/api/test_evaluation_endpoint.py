@@ -139,7 +139,67 @@ class TestDueReportIsActuallyScored:
 
         assert response.status_code == 200
         # 13 hours old: the 12h checkpoint has elapsed, the rest have not.
-        assert response.json()["evaluated"] == 1
+        body = response.json()
+        assert body["evaluated"] == 1
+        assert body["degraded"] is False
+
+
+class UnreachableFetcher:
+    """A price source that is down, exactly as a bad URL behaves."""
+
+    def current_probability(self, market_slug: str) -> float | None:
+        return None
+
+
+class TestADegradedCycleIsVisibleToTheCaller:
+    def test_a_cycle_that_could_not_price_a_due_report_says_so(self, client):
+        # This is the failure that ran green for five consecutive scheduled
+        # runs across six days while writing no checkpoints at all: the price
+        # source was unreachable, every due report was skipped, and the route
+        # answered 200 with evaluated=0 -- byte-identical to a cycle with
+        # nothing due. The cron only checked the status code, so nothing ever
+        # surfaced it.
+        app = client.app
+        store = app.state.memory_store
+        store.save_report(
+            MarketAnalysisReport(
+                market_id="0xabc",
+                timestamp=datetime.now(tz=UTC),
+                summary="whale accumulation",
+                primary_causal_driver="WHALE_ACTIVITY",
+                confidence_score=0.80,
+                key_drivers=[],
+            ),
+            "ballon-dor-winner-2026",
+            0.50,
+            created_at=datetime.now(tz=UTC) - timedelta(hours=13),
+        )
+        app.state.price_fetcher = UnreachableFetcher()
+
+        response = client.post(
+            "/v1/internal/evaluations/run", headers={"x-cron-secret": SECRET}
+        )
+
+        # Still 200: the cycle ran to completion and nothing needs rolling
+        # back. What changes is that the body no longer hides the outage.
+        assert response.status_code == 200
+        body = response.json()
+        assert body["evaluated"] == 0
+        assert body["reports_due"] == 1
+        assert body["price_unavailable"] == 1
+        assert body["degraded"] is True
+
+    def test_a_cycle_with_nothing_due_is_not_degraded(self, client):
+        # The other half of the contract. If an idle cycle reported degraded,
+        # the cron would fail on every quiet run and be muted within a week.
+        response = client.post(
+            "/v1/internal/evaluations/run", headers={"x-cron-secret": SECRET}
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["evaluated"] == 0
+        assert body["degraded"] is False
 
 
 class TestExposure:
