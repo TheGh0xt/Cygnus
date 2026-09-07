@@ -1,3 +1,15 @@
+-- ⚠️  SUPERSEDED — DO NOT APPLY. Superseded by 2026-09-07-beta-schema.sql.
+--
+-- This migration was written but never applied. It was also wrong: it ADDs
+-- prompt_tokens/response_tokens/total_tokens, but analysis_usage already
+-- carried input_tokens/output_tokens, so applying it would have left five
+-- token columns of which two were dead. The replacement renames instead.
+--
+-- Kept for the record, because the gap it left is worth remembering: the code
+-- wrote column names that did not exist, record_usage swallowed PostgREST's
+-- rejection, and cost data silently collected nothing for seventeen days while
+-- every analysis reported success.
+--
 -- ROADMAP 5.6 — cost per analysis.
 --
 -- Apply to the Supabase Postgres (SQL editor or CLI). Until it is applied,

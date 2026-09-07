@@ -25,6 +25,7 @@ class ErrorType(str, Enum):
     INVALID_REQUEST = "invalid-request"
     ANALYSIS_NOT_FOUND = "analysis-not-found"
     INTERNAL_ERROR = "internal-error"
+    NOT_IMPLEMENTED = "not-implemented"
 
 
 _TITLES = {
@@ -36,6 +37,7 @@ _TITLES = {
     ErrorType.INVALID_REQUEST: "Invalid request",
     ErrorType.ANALYSIS_NOT_FOUND: "Analysis not found",
     ErrorType.INTERNAL_ERROR: "Internal error",
+    ErrorType.NOT_IMPLEMENTED: "Not implemented yet",
 }
 
 
