@@ -10,6 +10,8 @@ the API, and the response has to say what actually happened.
 """
 
 import os
+import pathlib
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +28,16 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("PMIE_CRON_SECRET", SECRET)
     app = create_app(db_path=str(tmp_path / "gen.db"))
     return TestClient(app)
+
+
+def _cron_hours(workflow_text: str) -> set[int]:
+    """Hours a workflow's schedule fires, from either cron form."""
+    match = re.search(r'- cron: "0 (\S+) \* \* \*"', workflow_text)
+    assert match, "workflow has no recognisable hourly cron"
+    field = match.group(1)
+    if field.startswith("*/"):
+        return set(range(0, 24, int(field[2:])))
+    return {int(h) for h in field.split(",")}
 
 
 class TestAuthorisation:
@@ -129,7 +141,11 @@ class TestSpendCeiling:
         assert captured["limit"] == 1
 
     def test_defaults_match_the_agreed_budget(self, client, monkeypatch):
-        # 8/day across four 6-hourly cycles.
+        # 24/day across eight 3-hourly cycles. Raised from 8/day so a
+        # calibration curve is reachable in ~13 days rather than ~38; the
+        # raise went into cadence rather than batch size, because reports
+        # created together come due together and backfill from one price
+        # observation.
         captured = {}
 
         async def fake_cycle(**kwargs):
@@ -146,5 +162,42 @@ class TestSpendCeiling:
 
         client.post("/v1/internal/generation/run", headers={"x-cron-secret": SECRET})
 
-        assert captured["daily_cap"] == 8
-        assert captured["limit"] == 2
+        assert captured["daily_cap"] == 24
+        assert captured["limit"] == 3
+
+    def test_daily_cap_matches_the_cron_cadence(self):
+        """The budget is per_cycle x cycles/day — keep the two in step.
+
+        Raising the cron frequency without lowering the per-cycle limit (or
+        vice versa) silently changes real Gemini spend, which is the exact
+        drift the budget guard above exists to catch.
+        """
+        from src.api.generation_routes import _DEFAULT_DAILY_CAP, _DEFAULT_PER_CYCLE
+
+        workflow = (
+            pathlib.Path(__file__).resolve().parents[2]
+            / ".github"
+            / "workflows"
+            / "generate.yml"
+        ).read_text()
+
+        generation_hours = _cron_hours(workflow)
+        assert _DEFAULT_PER_CYCLE * len(generation_hours) == _DEFAULT_DAILY_CAP
+
+    def test_generation_never_collides_with_evaluation(self):
+        """The two crons are offset on purpose.
+
+        Both wake a cold-starting Sagittarius, and a shared free instance
+        cannot serve a generation fan-out and an evaluation sweep at once.
+        The original 3/9/15/21 schedule encoded that offset; anything that
+        re-derives the cadence has to preserve it.
+        """
+        workflows = (
+            pathlib.Path(__file__).resolve().parents[2] / ".github" / "workflows"
+        )
+        generation = _cron_hours((workflows / "generate.yml").read_text())
+        evaluation = _cron_hours((workflows / "evaluate.yml").read_text())
+
+        assert generation & evaluation == set(), (
+            f"generation and evaluation both fire at {sorted(generation & evaluation)}"
+        )

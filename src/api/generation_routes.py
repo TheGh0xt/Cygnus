@@ -40,14 +40,22 @@ router = APIRouter(prefix="/v1/internal", include_in_schema=False)
 
 _SECRET_HEADER = "x-cron-secret"
 
-# 8 analyses a day, as 2 per cycle across four 6-hourly cycles.
+# 24 analyses a day, as 3 per cycle across eight 3-hourly cycles.
 #
 # Spread rather than bursted on purpose: reports created together come due
 # together, and a batch that ages past several horizons between evaluation
 # cycles gets backfilled from a single price observation — the defect seen on
 # report 7, whose four checkpoints all share observed_price 0.074.
-_DEFAULT_DAILY_CAP = 8
-_DEFAULT_PER_CYCLE = 2
+#
+# The raise from 8/day is what puts an accuracy record in reach: a calibration
+# curve needs a few hundred scored reports, which is roughly 13 days at this
+# rate against 38 at the old one. Cadence carried the raise rather than batch
+# size — four cycles of 6 would have reached 24/day too, but by tripling the
+# batch that the comment above warns about. Both values stay env-overridable
+# via PMIE_GENERATION_DAILY_CAP / PMIE_GENERATION_PER_CYCLE, and a cap of 0
+# remains a kill switch.
+_DEFAULT_DAILY_CAP = 24
+_DEFAULT_PER_CYCLE = 3
 
 
 def _authorise(request: Request) -> None:
