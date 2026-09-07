@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import httpx
 
 from .config import supabase_secret_key, supabase_url
+from .usage import TokenUsage
 
 logger = logging.getLogger("cygnus.api.accounts")
 
@@ -166,24 +167,38 @@ class Accounts:
         outcome: str,
         event_slug: str | None = None,
         duration_ms: int | None = None,
+        tokens: TokenUsage | None = None,
     ) -> None:
         """Record one analysis attempt.
 
         Never raises into the caller's path: usage accounting must not be able
         to fail a request the user already paid attention to. A dropped row is
         a reporting gap; a failed analysis is a broken product.
+
+        That tolerance also covers the token columns (ROADMAP 5.6) before
+        their migration has been applied: PostgREST rejects unknown columns,
+        the rejection is caught here, and analyses keep working while the cost
+        record stays empty. Check the logs after deploying the migration
+        rather than assuming silence means success — that assumption is
+        exactly what cost five days on 2026-08-20.
         """
+        payload = {
+            "profile_id": profile_id,
+            "analysis_id": analysis_id,
+            "outcome": outcome,
+            "event_slug": event_slug,
+            "duration_ms": duration_ms,
+        }
+        # Omitted entirely when nothing was measured: a row of zeroes in a
+        # cost record reads as an analysis that was free.
+        if tokens:
+            payload.update(tokens.as_dict())
+
         try:
             self._request(
                 "POST",
                 "/analysis_usage",
-                json={
-                    "profile_id": profile_id,
-                    "analysis_id": analysis_id,
-                    "outcome": outcome,
-                    "event_slug": event_slug,
-                    "duration_ms": duration_ms,
-                },
+                json=payload,
             )
         except AccountsError:
             logger.exception("failed to record usage for analysis %s", analysis_id)

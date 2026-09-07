@@ -8,11 +8,13 @@ from fastapi import FastAPI, Request
 
 from ..config import sagittarius_url, warm_sagittarius
 from ..evaluation.worker import SagittariusPriceFetcher
+from ..generation.discovery import SagittariusDiscovery
 from ..memory import build_memory_store
 from .accounts import Accounts
 from .auth import JwksCache
 from .errors import PmieError, problem_response
 from .evaluation_routes import router as evaluation_router
+from .generation_routes import router as generation_router
 from .logging import configure_logging, new_request_id, request_id_var
 from .persistence import ReportPersistence
 from .pipeline import AnalysisPipeline, build_runner
@@ -68,6 +70,9 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     # same store and price fetcher rather than constructing its own.
     app.state.memory_store = store
     app.state.price_fetcher = fetcher
+    # Market discovery, shared by the scheduled generation cycle and (later)
+    # the personalised feed. Both ask Sagittarius the same question.
+    app.state.discovery = SagittariusDiscovery(sagittarius_url())
 
     accounts = Accounts()
     app.state.accounts = accounts
@@ -120,4 +125,5 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     app.state.write_access = None
     app.include_router(router)
     app.include_router(evaluation_router)
+    app.include_router(generation_router)
     return app

@@ -1,0 +1,83 @@
+name: Scheduled generation
+
+# ROADMAP 4.12. Layers 1-5 all work and report 7 scored CONFIRMED at every
+# horizon, but the store held a single report because persistence only
+# captures an analysis somebody runs — and for six days nobody ran one. The
+# evaluation engine was idle for want of input, not broken.
+#
+# This workflow supplies that input: ask Sagittarius what is moving in each
+# product category, and analyse the most interesting of it.
+#
+# GitHub Actions rather than an in-process scheduler, for the same reason as
+# the evaluation cycle: a free container plan suspends when idle, so a
+# scheduler inside the service never fires, and platform cron is paid.
+
+on:
+  schedule:
+    # Every six hours, offset three hours from the evaluation workflow so the
+    # two never contend for a cold-starting Sagittarius. Two markets per cycle
+    # is eight a day.
+    - cron: "0 3,9,15,21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two cycles must never overlap: both would read the same recent-analysis
+  # window, and each would believe the daily ceiling had room.
+  group: scheduled-generation
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: analyse moving markets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger a generation cycle
+        env:
+          CYGNUS_URL: ${{ secrets.CYGNUS_URL }}
+          CRON_SECRET: ${{ secrets.PMIE_CRON_SECRET }}
+        run: |
+          if [ -z "$CYGNUS_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::CYGNUS_URL and PMIE_CRON_SECRET must be set as repository secrets."
+            exit 1
+          fi
+
+          # Generous: the service may be asleep (~50s cold start) and each
+          # analysis is four Gemini stages plus search grounding.
+          response=$(curl -sS --max-time 900 -w '\n%{http_code}' \
+            -X POST "$CYGNUS_URL/v1/internal/generation/run" \
+            -H "x-cron-secret: $CRON_SECRET")
+
+          body=$(echo "$response" | sed '$d')
+          status=$(echo "$response" | tail -n1)
+
+          echo "status: $status"
+          echo "body:   $body"
+
+          if [ "$status" != "200" ]; then
+            echo "::error::Generation cycle failed with status $status."
+            exit 1
+          fi
+
+          # A 200 is not success on its own. The evaluation workflow taught
+          # this the expensive way: it returned 200 with a bare zero for five
+          # days while three documents recorded the wrong reason. Here the
+          # body carries why, so the workflow can tell the difference between
+          # a quiet market and a broken one — and only fails the run for the
+          # second.
+          discovery_error=$(echo "$body" | sed -n 's/.*"discovery_error":"\([^"]*\)".*/\1/p')
+          if [ -n "$discovery_error" ]; then
+            echo "::error::Discovery failed: $discovery_error"
+            exit 1
+          fi
+
+          generated=$(echo "$body" | sed -n 's/.*"generated":\([0-9]*\).*/\1/p')
+          if [ "$generated" = "0" ]; then
+            # Legitimate — everything may be in cooldown, or the ceiling
+            # reached. A warning keeps it visible without crying wolf.
+            echo "::warning::No analyses generated this cycle. $body"
+          else
+            echo "::notice::Generated $generated analysis/analyses. $body"
+          fi

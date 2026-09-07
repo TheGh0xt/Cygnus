@@ -87,6 +87,27 @@ class EvaluationRunResponse(BaseModel):
     degraded: bool = False
 
 
+class GenerationSkip(BaseModel):
+    market_slug: str
+    reason: str
+
+
+class GenerationRunResponse(BaseModel):
+    """What one generation cycle did, and why it did not do more.
+
+    Deliberately richer than EvaluationRunResponse. A bare count cannot
+    distinguish "nothing was moving" from "Sagittarius is down" from "the
+    spend ceiling stopped it", and on 2026-08-20 exactly that ambiguity went
+    undiagnosed for five days.
+    """
+
+    generated: int
+    no_candidates: bool = False
+    discovery_error: str | None = None
+    skipped: list[GenerationSkip] = []
+    skipped_by_reason: dict[str, int] = {}
+
+
 class ProblemResponse(BaseModel):
     """RFC 9457 problem+json.
 

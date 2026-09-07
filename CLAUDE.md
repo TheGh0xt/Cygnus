@@ -6,15 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Cygnus is **Layer 4 (Reasoning Agent)** of the Prediction Market Intelligence Engine (PMIE) — a multi-layer system that explains *why* prices move on Polymarket prediction markets. Cygnus is built on Google's Agent Development Kit (ADK) and orchestrates specialist agents powered by Gemini.
 
-The 5 layers map onto exactly **two repos**, split by runtime and synchronous coupling — do not create new repos for Layers 2, 3, or 5:
-
-- **Layer 1 — Sagittarius** (Sagittarius repo, Go): MCP server exposing Polymarket data tools
-- **Layer 2 — Signal Engine** (Sagittarius repo, Go): deterministic anomaly detection, no LLM; in-process with Layer 1 (hot path — never behind an MCP hop), exposing scored signals as additional MCP tools
-- **Layer 3 — Memory Layer** (this repo, planned): vector/KV store for token optimization; Layer 4 needs its semantic context on essentially every reasoning call, and their schemas evolve in lockstep
-- **Layer 4 — Cygnus** (this repo): ADK-based reasoning agent orchestration
-- **Layer 5 — Evaluation Engine** (this repo, planned): T+48h accuracy backtesting as a cron-style subpackage reading the Memory Layer's store; split into its own deployable only when it needs independent scaling or release cadence
-
-The MCP connection to Sagittarius is the **only** cross-repo seam. All Memory Layer writes happen in this repo — Cygnus fetches scored signals over MCP and stores them itself; Sagittarius never writes to the memory store directly.
+The repo/layer mapping and its rationale live in the workspace-root `CLAUDE.md`,
+which is always loaded — this repo owns Layers 3, 4 and 5.
 
 ## Development Commands
 
@@ -117,11 +110,8 @@ Two constraints that bite when touching this:
 
 `market_event_agent` connects to the Sagittarius MCP server via StreamableHTTP. The URL is read from the `SAGITTARIUS_MCP_URL` environment variable (default: `http://localhost:8080/mcp`). Sagittarius must be running before invoking the event agent.
 
-Available MCP tools (exposed by Sagittarius):
-- `get_event_by_id` — fetch by numeric Polymarket event ID (event agent)
-- `get_event_by_slug` — fetch by slug or extracted from a Polymarket URL (event agent)
-- `get_market_snapshot` — per-market probability, orderbook skew, volume-spike analysis, whale count (signal agent)
-- `get_whale_activity` — whale-sized trades per market with buy/sell ratio (signal agent)
+The tool list is authoritative in `Sagittarius/CLAUDE.md` and on the running
+server — don't mirror it here.
 
 ## Key Constraints
 
