@@ -117,7 +117,7 @@ server — don't mirror it here.
 
 - The output contract for the full reasoning pipeline is a `MarketAnalysisReport` JSON schema (defined in `docs/docs_AGENT_SPEC.md`). Enforce it when implementing the reasoning output stage.
 - Raw trade/order book data must **never** be sent to the LLM directly — it must be aggregated first (Memory Layer responsibility, Layer 3).
-- The `master` branch is protected; all changes go through PRs via the `pre-push` hook in `scripts/hooks/pre-push`.
+- The `main` branch is protected; all changes go through PRs via the `pre-push` hook in `scripts/hooks/pre-push`.
 - The `docs/` directory is gitignored except for `docs_AGENT_SPEC.md`.
 
 ## Environment Variables

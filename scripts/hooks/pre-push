@@ -1,7 +1,11 @@
 #!/bin/sh
-# Blocks direct pushes to master. All changes must go through a PR.
+# Local gate before a push. Two jobs: keep direct pushes off the protected
+# branch, and run the checks CI will run anyway — failing here costs seconds,
+# failing in CI costs a round trip.
+#
+# Install: cp scripts/hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
 
-protected_branch="master"
+protected_branch="main"
 current_branch=$(git symbolic-ref HEAD 2>/dev/null | sed 's|refs/heads/||')
 
 if [ "$current_branch" = "$protected_branch" ]; then
@@ -11,3 +15,42 @@ if [ "$current_branch" = "$protected_branch" ]; then
   echo ""
   exit 1
 fi
+
+# Prefer the venv, fall back to whatever is on PATH. If neither has the tool,
+# skip rather than block — a contributor without a local env should still be
+# able to push and let CI decide.
+if [ -x .venv/bin/ruff ]; then
+  RUFF=.venv/bin/ruff
+else
+  RUFF=$(command -v ruff)
+fi
+if [ -x .venv/bin/python ]; then
+  PY=.venv/bin/python
+else
+  PY=$(command -v python3)
+fi
+
+fail() {
+  echo ""
+  echo "  $1"
+  echo "  Push aborted. Fix it, or re-run with --no-verify if you know better."
+  echo ""
+  exit 1
+}
+
+if [ -n "$RUFF" ]; then
+  $RUFF check . || fail "ruff check failed."
+  # CI runs 'ruff format --check'. Omitting it here is what let unformatted
+  # test files reach CI on PR #20 after passing every local check.
+  $RUFF format --check . >/dev/null || fail "ruff format --check failed — run '$RUFF format .'"
+else
+  echo "  pre-push: ruff not found, skipping lint (CI will still run it)."
+fi
+
+if [ -n "$PY" ]; then
+  $PY -m pytest tests/ -q >/dev/null || fail "pytest failed."
+else
+  echo "  pre-push: python not found, skipping tests (CI will still run them)."
+fi
+
+exit 0
