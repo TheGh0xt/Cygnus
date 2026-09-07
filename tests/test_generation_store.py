@@ -45,8 +45,12 @@ class TestRecentAnalyses:
 
     def test_excludes_rows_older_than_the_window(self, tmp_path):
         store = _store(tmp_path)
-        store.save_report(_report(), "ancient", 0.42, created_at=NOW - timedelta(days=9))
-        store.save_report(_report(), "recent", 0.42, created_at=NOW - timedelta(hours=2))
+        store.save_report(
+            _report(), "ancient", 0.42, created_at=NOW - timedelta(days=9)
+        )
+        store.save_report(
+            _report(), "recent", 0.42, created_at=NOW - timedelta(hours=2)
+        )
 
         recent = store.recent_analyses(since=NOW - timedelta(hours=24))
 
@@ -56,8 +60,12 @@ class TestRecentAnalyses:
         # Re-analysis is deliberate — 4.4 needs per-market history — so the
         # cooldown must see each occurrence, not a deduplicated set.
         store = _store(tmp_path)
-        store.save_report(_report(), "btc-150k", 0.42, created_at=NOW - timedelta(hours=20))
-        store.save_report(_report(), "btc-150k", 0.44, created_at=NOW - timedelta(hours=3))
+        store.save_report(
+            _report(), "btc-150k", 0.42, created_at=NOW - timedelta(hours=20)
+        )
+        store.save_report(
+            _report(), "btc-150k", 0.44, created_at=NOW - timedelta(hours=3)
+        )
 
         recent = store.recent_analyses(since=NOW - timedelta(hours=24))
 

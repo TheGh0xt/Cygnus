@@ -50,20 +50,26 @@ class TestAccumulating:
 
     def test_none_counts_are_treated_as_zero(self):
         # Gemini omits fields rather than sending zeroes.
-        usage = add_event_usage(TokenUsage(), _event(prompt=None, candidates=5, total=5))
+        usage = add_event_usage(
+            TokenUsage(), _event(prompt=None, candidates=5, total=5)
+        )
         assert usage.prompt_tokens == 0
         assert usage.response_tokens == 5
 
     def test_totals_are_derived_when_absent(self):
         # If total_token_count is missing, prompt+response is still the honest
         # answer — better than reporting zero for a run that cost real money.
-        usage = add_event_usage(TokenUsage(), _event(prompt=100, candidates=25, total=None))
+        usage = add_event_usage(
+            TokenUsage(), _event(prompt=100, candidates=25, total=None)
+        )
         assert usage.total_tokens == 125
 
     def test_recorded_totals_win_over_derived_ones(self):
         # Gemini's own total includes tokens the two component fields do not,
         # such as cached content, so trust it when present.
-        usage = add_event_usage(TokenUsage(), _event(prompt=100, candidates=25, total=400))
+        usage = add_event_usage(
+            TokenUsage(), _event(prompt=100, candidates=25, total=400)
+        )
         assert usage.total_tokens == 400
 
 
@@ -114,7 +120,9 @@ class TestUsageRowPayload:
             profile_id="p1",
             analysis_id="a1",
             outcome="completed",
-            tokens=TokenUsage(prompt_tokens=900, response_tokens=120, total_tokens=1020),
+            tokens=TokenUsage(
+                prompt_tokens=900, response_tokens=120, total_tokens=1020
+            ),
         )
 
         assert sent["json"]["total_tokens"] == 1020

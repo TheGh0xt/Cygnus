@@ -22,7 +22,9 @@ from src.memory.store import RecentAnalysis
 NOW = datetime(2026, 8, 21, 12, 0, 0, tzinfo=UTC)
 
 
-def _candidate(slug: str, change: float = 0.20, category: str = "Politics") -> Candidate:
+def _candidate(
+    slug: str, change: float = 0.20, category: str = "Politics"
+) -> Candidate:
     return Candidate(
         market_slug=slug,
         title=slug,

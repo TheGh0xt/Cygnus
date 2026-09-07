@@ -104,7 +104,9 @@ class TestGenerating:
         # The pipeline routes on intent, so a generated query has to read like
         # a causal question or it will not reach the analysis pipeline.
         pipeline = FakePipeline()
-        await _run(discovery=FakeDiscovery([_candidate("fed-decision")]), pipeline=pipeline)
+        await _run(
+            discovery=FakeDiscovery([_candidate("fed-decision")]), pipeline=pipeline
+        )
 
         query = pipeline.runs[0]["query"].lower()
         assert "why" in query
@@ -195,4 +197,6 @@ class TestGuardrails:
         store = FakeStore()
         await _run(discovery=FakeDiscovery([_candidate("a")]), store=store)
 
-        assert store.since_asked <= NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+        assert store.since_asked <= NOW.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )

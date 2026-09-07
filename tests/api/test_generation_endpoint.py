@@ -55,9 +55,7 @@ class TestResponseShape:
         async def no_markets(*a, **kw):
             return []
 
-        monkeypatch.setattr(
-            client.app.state.discovery, "moving_markets", no_markets
-        )
+        monkeypatch.setattr(client.app.state.discovery, "moving_markets", no_markets)
 
         response = client.post(
             "/v1/internal/generation/run", headers={"x-cron-secret": SECRET}
@@ -95,9 +93,7 @@ class TestResponseShape:
                 Candidate("m1", "Market one", "Politics", 0.4, 0.2),
             ]
 
-        monkeypatch.setattr(
-            client.app.state.discovery, "moving_markets", one_market
-        )
+        monkeypatch.setattr(client.app.state.discovery, "moving_markets", one_market)
         # A cap of zero is the cheapest way to force a typed skip without
         # running the model.
         monkeypatch.setenv("PMIE_GENERATION_DAILY_CAP", "0")
@@ -127,9 +123,7 @@ class TestSpendCeiling:
         monkeypatch.setenv("PMIE_GENERATION_DAILY_CAP", "3")
         monkeypatch.setenv("PMIE_GENERATION_PER_CYCLE", "1")
 
-        client.post(
-            "/v1/internal/generation/run", headers={"x-cron-secret": SECRET}
-        )
+        client.post("/v1/internal/generation/run", headers={"x-cron-secret": SECRET})
 
         assert captured["daily_cap"] == 3
         assert captured["limit"] == 1
@@ -150,9 +144,7 @@ class TestSpendCeiling:
         monkeypatch.delenv("PMIE_GENERATION_DAILY_CAP", raising=False)
         monkeypatch.delenv("PMIE_GENERATION_PER_CYCLE", raising=False)
 
-        client.post(
-            "/v1/internal/generation/run", headers={"x-cron-secret": SECRET}
-        )
+        client.post("/v1/internal/generation/run", headers={"x-cron-secret": SECRET})
 
         assert captured["daily_cap"] == 8
         assert captured["limit"] == 2
