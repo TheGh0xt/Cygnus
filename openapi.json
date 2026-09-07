@@ -89,6 +89,84 @@
         "title": "AnalysisResult",
         "type": "object"
       },
+      "CalibrationBin": {
+        "description": "One point on the reliability curve.",
+        "properties": {
+          "lower": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Lower",
+            "type": "number"
+          },
+          "observed_accuracy": {
+            "description": "Share that held up at 48h.",
+            "title": "Observed Accuracy",
+            "type": "number"
+          },
+          "sample_size": {
+            "title": "Sample Size",
+            "type": "integer"
+          },
+          "stated_confidence": {
+            "description": "Mean confidence claimed in this bin.",
+            "title": "Stated Confidence",
+            "type": "number"
+          },
+          "upper": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Upper",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lower",
+          "upper",
+          "stated_confidence",
+          "observed_accuracy",
+          "sample_size"
+        ],
+        "title": "CalibrationBin",
+        "type": "object"
+      },
+      "CalibrationResponse": {
+        "description": "Explanation calibration \u2014 NOT a forecast record.\n\nThis answers \"when PMIE says 0.7, is it right about 70% of the time?\" It\ndoes not score predictions of market outcomes, because PMIE does not make\nany. `sufficient` gates display: a curve drawn from a handful of reports\nmisleads, so the UI shows a collecting state until there is enough.",
+        "properties": {
+          "bins": {
+            "items": {
+              "$ref": "#/components/schemas/CalibrationBin"
+            },
+            "title": "Bins",
+            "type": "array"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "minimum_for_display": {
+            "title": "Minimum For Display",
+            "type": "integer"
+          },
+          "sufficient": {
+            "title": "Sufficient",
+            "type": "boolean"
+          },
+          "total_scored": {
+            "title": "Total Scored",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bins",
+          "total_scored",
+          "minimum_for_display",
+          "sufficient",
+          "generated_at"
+        ],
+        "title": "CalibrationResponse",
+        "type": "object"
+      },
       "CategoriesResponse": {
         "properties": {
           "categories": {
@@ -114,6 +192,65 @@
           "UNKNOWN_ANOMALY"
         ],
         "title": "CausalDriver",
+        "type": "string"
+      },
+      "CitedSource": {
+        "description": "One item of evidence, with its provenance and its bearing on the cause.\n\nA CONTRADICTS entry is a feature, not a failure: showing the evidence that\ncuts against the conclusion is what makes the confidence score legible.",
+        "properties": {
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "publisher": {
+            "title": "Publisher",
+            "type": "string"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/SourceTier"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/ClaimVerification"
+          }
+        },
+        "required": [
+          "title",
+          "publisher",
+          "tier",
+          "verification"
+        ],
+        "title": "CitedSource",
+        "type": "object"
+      },
+      "ClaimVerification": {
+        "description": "Whether a citation bears on the stated cause \u2014 not whether it is true.",
+        "enum": [
+          "SUPPORTS",
+          "CONTRADICTS",
+          "UNSUPPORTED"
+        ],
+        "title": "ClaimVerification",
         "type": "string"
       },
       "FeedbackRequest": {
@@ -297,6 +434,14 @@
       },
       "MarketAnalysisReport": {
         "properties": {
+          "cited_sources": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CitedSource"
+            },
+            "title": "Cited Sources",
+            "type": "array"
+          },
           "confidence_score": {
             "maximum": 1.0,
             "minimum": 0.0,
@@ -327,6 +472,10 @@
           "primary_causal_driver": {
             "$ref": "#/components/schemas/CausalDriver"
           },
+          "source": {
+            "$ref": "#/components/schemas/MarketSource",
+            "default": "POLYMARKET"
+          },
           "summary": {
             "maxLength": 500,
             "title": "Summary",
@@ -347,6 +496,14 @@
         ],
         "title": "MarketAnalysisReport",
         "type": "object"
+      },
+      "MarketSource": {
+        "enum": [
+          "POLYMARKET",
+          "KALSHI"
+        ],
+        "title": "MarketSource",
+        "type": "string"
       },
       "MeResponse": {
         "properties": {
@@ -408,6 +565,191 @@
           "usage"
         ],
         "title": "MeResponse",
+        "type": "object"
+      },
+      "MfaEnrollResponse": {
+        "description": "TOTP enrollment. The secret is shown exactly once.",
+        "properties": {
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "qr_uri": {
+            "description": "otpauth:// URI for a QR code.",
+            "title": "Qr Uri",
+            "type": "string"
+          },
+          "recovery_codes": {
+            "description": "Single-use fallbacks. Shown once, stored hashed.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Recovery Codes",
+            "type": "array"
+          },
+          "secret": {
+            "description": "Base32 TOTP secret. Never returned again.",
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "factor_id",
+          "secret",
+          "qr_uri",
+          "recovery_codes"
+        ],
+        "title": "MfaEnrollResponse",
+        "type": "object"
+      },
+      "MfaStatusResponse": {
+        "properties": {
+          "enrolled": {
+            "title": "Enrolled",
+            "type": "boolean"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "enrolled"
+        ],
+        "title": "MfaStatusResponse",
+        "type": "object"
+      },
+      "MfaVerifyRequest": {
+        "properties": {
+          "code": {
+            "maxLength": 8,
+            "minLength": 6,
+            "title": "Code",
+            "type": "string"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "factor_id",
+          "code"
+        ],
+        "title": "MfaVerifyRequest",
+        "type": "object"
+      },
+      "MovingMarket": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "change_24h": {
+            "title": "Change 24H",
+            "type": "number"
+          },
+          "days_to_resolution": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days To Resolution"
+          },
+          "probability": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Probability",
+            "type": "number"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "source": {
+            "description": "POLYMARKET or KALSHI.",
+            "title": "Source",
+            "type": "string"
+          },
+          "volume_24h": {
+            "title": "Volume 24H",
+            "type": "number"
+          }
+        },
+        "required": [
+          "slug",
+          "question",
+          "source",
+          "probability",
+          "change_24h",
+          "volume_24h",
+          "category"
+        ],
+        "title": "MovingMarket",
+        "type": "object"
+      },
+      "MovingMarketsResponse": {
+        "description": "The personalised feed \u2014 ranked by movement, not popularity (UI_PRD 6.4).",
+        "properties": {
+          "categories": {
+            "description": "Categories this feed was built from.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/MovingMarket"
+            },
+            "title": "Markets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "markets",
+          "categories"
+        ],
+        "title": "MovingMarketsResponse",
+        "type": "object"
+      },
+      "PayIntentRequest": {
+        "description": "A click on the quota wall, not a payment.\n\nNo money moves during beta. This records that someone who had used the\nproduct wanted more of it at a stated price, which is the signal the beta\nexists to collect.",
+        "properties": {
+          "plan": {
+            "description": "Plan label shown, e.g. 'pro-monthly'.",
+            "title": "Plan",
+            "type": "string"
+          },
+          "price_shown_usd": {
+            "description": "The price on screen.",
+            "minimum": 0.0,
+            "title": "Price Shown Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "price_shown_usd",
+          "plan"
+        ],
+        "title": "PayIntentRequest",
         "type": "object"
       },
       "ProblemResponse": {
@@ -513,6 +855,90 @@
         "title": "ReadyResponse",
         "type": "object"
       },
+      "ReferralSummary": {
+        "properties": {
+          "analyses_granted": {
+            "title": "Analyses Granted",
+            "type": "integer"
+          },
+          "code": {
+            "description": "This user's own referral code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "converted_count": {
+            "description": "Referrals that verified their email. Only these count.",
+            "title": "Converted Count",
+            "type": "integer"
+          },
+          "next_reward_at": {
+            "description": "Converted referrals needed for the next grant.",
+            "title": "Next Reward At",
+            "type": "integer"
+          },
+          "referred_count": {
+            "title": "Referred Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "referred_count",
+          "converted_count",
+          "analyses_granted",
+          "next_reward_at"
+        ],
+        "title": "ReferralSummary",
+        "type": "object"
+      },
+      "ShareTokenResponse": {
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "url"
+        ],
+        "title": "ShareTokenResponse",
+        "type": "object"
+      },
+      "SourceTier": {
+        "description": "How much weight a citation can carry on its own.",
+        "enum": [
+          "PRIMARY",
+          "PARTIAL",
+          "WEAK"
+        ],
+        "title": "SourceTier",
+        "type": "string"
+      },
+      "UiMode": {
+        "enum": [
+          "TERMINAL",
+          "CONVENTIONAL"
+        ],
+        "title": "UiMode",
+        "type": "string"
+      },
       "UsageSummary": {
         "properties": {
           "analyses_this_month": {
@@ -534,6 +960,39 @@
           "free_monthly_allowance"
         ],
         "title": "UsageSummary",
+        "type": "object"
+      },
+      "UserEventRequest": {
+        "description": "Product telemetry. Never PII beyond the authenticated user id.",
+        "properties": {
+          "name": {
+            "description": "e.g. 'ui_mode_switched', 'analysis_started'.",
+            "title": "Name",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Properties",
+            "type": "object"
+          },
+          "ui_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UiMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "UserEventRequest",
         "type": "object"
       },
       "ValidationError": {
@@ -574,6 +1033,53 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WaitlistRequest": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "referral_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referral Code"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "WaitlistRequest",
+        "type": "object"
+      },
+      "WaitlistResponse": {
+        "properties": {
+          "already_registered": {
+            "default": false,
+            "title": "Already Registered",
+            "type": "boolean"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when positions are not disclosed.",
+            "title": "Position"
+          }
+        },
+        "title": "WaitlistResponse",
         "type": "object"
       }
     }
@@ -822,6 +1328,170 @@
         "summary": "Rate a report"
       }
     },
+    "/v1/analyses/{analysis_id}/share": {
+      "delete": {
+        "operationId": "revoke_share_token_v1_analyses__analysis_id__share_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          }
+        },
+        "summary": "Revoke a report's public link"
+      },
+      "post": {
+        "operationId": "create_share_token_v1_analyses__analysis_id__share_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          }
+        },
+        "summary": "Mint a public read-only link for a report"
+      }
+    },
+    "/v1/billing/intent": {
+      "post": {
+        "operationId": "record_pay_intent_v1_billing_intent_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayIntentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          }
+        },
+        "summary": "Record willingness to pay at the price shown"
+      }
+    },
+    "/v1/calibration": {
+      "get": {
+        "operationId": "calibration_v1_calibration_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalibrationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          }
+        },
+        "summary": "Reliability of PMIE's own confidence scores"
+      }
+    },
+    "/v1/events": {
+      "post": {
+        "operationId": "record_event_v1_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          }
+        },
+        "summary": "Record a product event (UI mode switch, analysis started)"
+      }
+    },
     "/v1/health": {
       "get": {
         "description": "Answers as soon as the process is up. Public: load balancers cannot\nauthenticate.",
@@ -869,6 +1539,27 @@
           }
         },
         "summary": "Selectable market categories"
+      }
+    },
+    "/v1/markets/moving": {
+      "get": {
+        "operationId": "moving_markets_v1_markets_moving_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovingMarketsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          }
+        },
+        "summary": "Markets moving now, in the user's categories"
       }
     },
     "/v1/me": {
@@ -995,6 +1686,110 @@
         "summary": "Choose 3-5 interest categories"
       }
     },
+    "/v1/me/mfa": {
+      "get": {
+        "operationId": "mfa_status_v1_me_mfa_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          }
+        },
+        "summary": "Whether TOTP is active for this user"
+      }
+    },
+    "/v1/me/mfa/enroll": {
+      "post": {
+        "operationId": "enroll_mfa_v1_me_mfa_enroll_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaEnrollResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          }
+        },
+        "summary": "Begin TOTP enrolment"
+      }
+    },
+    "/v1/me/mfa/verify": {
+      "post": {
+        "operationId": "verify_mfa_v1_me_mfa_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          }
+        },
+        "summary": "Confirm a TOTP code and activate the factor"
+      }
+    },
+    "/v1/me/referrals": {
+      "get": {
+        "operationId": "referrals_v1_me_referrals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferralSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          }
+        },
+        "summary": "This user's referral code and its standing"
+      }
+    },
     "/v1/ready": {
       "get": {
         "description": "Reports whether this process can do its job, not merely that it is up.\n\nDistinct from /health on purpose: a server that cannot persist reports\nanswers /health perfectly well while silently discarding the only data\nthe product's claims rest on.",
@@ -1012,6 +1807,47 @@
           }
         },
         "summary": "Readiness"
+      }
+    },
+    "/v1/waitlist": {
+      "post": {
+        "operationId": "join_waitlist_v1_waitlist_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WaitlistRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaitlistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          }
+        },
+        "summary": "Join the beta waitlist (public)"
       }
     }
   }

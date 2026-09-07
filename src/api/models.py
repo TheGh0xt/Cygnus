@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
+from enum import Enum
 
 from pydantic import BaseModel, Field
 
@@ -161,3 +163,135 @@ def extract_slug(query: str, slug: str | None) -> str:
         return url_match.group(1)
     candidates = _BARE_SLUG.findall(query.lower())
     return max(candidates, key=len) if candidates else ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Frozen contract — shapes agreed before the logic exists.
+#
+# These models are the whole point of Wave 0: Lyra generates its typed client
+# from openapi.json, so a screen cannot be built against a route that is not in
+# the schema. Freezing the shapes up front lets the three repos work in
+# parallel against a committed artifact instead of negotiating with each other
+# mid-build. The routes serving them return 501 until their owning team lands
+# the logic; see contract_stubs.py.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class MfaEnrollResponse(BaseModel):
+    """TOTP enrollment. The secret is shown exactly once."""
+
+    factor_id: str
+    secret: str = Field(description="Base32 TOTP secret. Never returned again.")
+    qr_uri: str = Field(description="otpauth:// URI for a QR code.")
+    recovery_codes: list[str] = Field(
+        description="Single-use fallbacks. Shown once, stored hashed."
+    )
+
+
+class MfaVerifyRequest(BaseModel):
+    factor_id: str
+    code: str = Field(min_length=6, max_length=8)
+
+
+class MfaStatusResponse(BaseModel):
+    enrolled: bool
+    verified_at: datetime | None = None
+
+
+class ReferralSummary(BaseModel):
+    code: str = Field(description="This user's own referral code.")
+    referred_count: int
+    converted_count: int = Field(
+        description="Referrals that verified their email. Only these count."
+    )
+    analyses_granted: int
+    next_reward_at: int = Field(
+        description="Converted referrals needed for the next grant."
+    )
+
+
+class WaitlistRequest(BaseModel):
+    email: str
+    referral_code: str | None = None
+
+
+class WaitlistResponse(BaseModel):
+    position: int | None = Field(
+        default=None, description="Null when positions are not disclosed."
+    )
+    already_registered: bool = False
+
+
+class PayIntentRequest(BaseModel):
+    """A click on the quota wall, not a payment.
+
+    No money moves during beta. This records that someone who had used the
+    product wanted more of it at a stated price, which is the signal the beta
+    exists to collect.
+    """
+
+    price_shown_usd: float = Field(ge=0, description="The price on screen.")
+    plan: str = Field(description="Plan label shown, e.g. 'pro-monthly'.")
+
+
+class UiMode(str, Enum):
+    TERMINAL = "TERMINAL"
+    CONVENTIONAL = "CONVENTIONAL"
+
+
+class UserEventRequest(BaseModel):
+    """Product telemetry. Never PII beyond the authenticated user id."""
+
+    name: str = Field(description="e.g. 'ui_mode_switched', 'analysis_started'.")
+    ui_mode: UiMode | None = None
+    properties: dict[str, str] = {}
+
+
+class ShareTokenResponse(BaseModel):
+    token: str
+    url: str
+    expires_at: datetime | None = None
+
+
+class CalibrationBin(BaseModel):
+    """One point on the reliability curve."""
+
+    lower: float = Field(ge=0.0, le=1.0)
+    upper: float = Field(ge=0.0, le=1.0)
+    stated_confidence: float = Field(description="Mean confidence claimed in this bin.")
+    observed_accuracy: float = Field(description="Share that held up at 48h.")
+    sample_size: int
+
+
+class CalibrationResponse(BaseModel):
+    """Explanation calibration — NOT a forecast record.
+
+    This answers "when PMIE says 0.7, is it right about 70% of the time?" It
+    does not score predictions of market outcomes, because PMIE does not make
+    any. `sufficient` gates display: a curve drawn from a handful of reports
+    misleads, so the UI shows a collecting state until there is enough.
+    """
+
+    bins: list[CalibrationBin]
+    total_scored: int
+    minimum_for_display: int
+    sufficient: bool
+    generated_at: datetime
+
+
+class MovingMarket(BaseModel):
+    slug: str
+    question: str
+    source: str = Field(description="POLYMARKET or KALSHI.")
+    probability: float = Field(ge=0.0, le=1.0)
+    change_24h: float
+    volume_24h: float
+    category: str
+    days_to_resolution: int | None = None
+
+
+class MovingMarketsResponse(BaseModel):
+    """The personalised feed — ranked by movement, not popularity (UI_PRD 6.4)."""
+
+    markets: list[MovingMarket]
+    categories: list[str] = Field(description="Categories this feed was built from.")
