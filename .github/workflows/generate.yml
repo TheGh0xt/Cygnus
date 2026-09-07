@@ -14,10 +14,11 @@ name: Scheduled generation
 
 on:
   schedule:
-    # Every six hours, offset three hours from the evaluation workflow so the
-    # two never contend for a cold-starting Sagittarius. Two markets per cycle
-    # is eight a day.
-    - cron: "0 3,9,15,21 * * *"
+    # Every three hours, offset one hour from the evaluation workflow so the
+    # two never contend for a cold-starting Sagittarius — evaluation runs at
+    # 0/6/12/18, so generation deliberately avoids those hours. Three markets
+    # per cycle is twenty-four a day.
+    - cron: "0 1,4,7,10,13,16,19,22 * * *"
   workflow_dispatch:
 
 permissions:
