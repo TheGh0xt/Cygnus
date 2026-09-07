@@ -130,7 +130,7 @@ These constraints are enforced directly in each agent's system prompt (not just 
 - **The event agent never speculates.** It retrieves exactly one event using exactly one tool and returns the raw tool result — no summarization, no analysis, no predictions.
 - **The formatter never invents or infers.** It presents data for readability only; it never changes numeric values or fills in missing fields.
 - **Raw trade/order-book data must never reach the LLM directly.** Aggregation is the Memory Layer's job (Layer 3) — Cygnus only ever reasons over pre-processed, semantically dense context once that layer exists.
-- **`master` is protected.** All changes go through pull requests — enforced locally by the `pre-push` git hook in `scripts/hooks/pre-push`.
+- **`main` is protected.** All changes go through pull requests — enforced locally by the `pre-push` git hook in `scripts/hooks/pre-push`.
 
 ## Layers 3 & 5: Memory Store and Evaluation Worker
 
@@ -195,7 +195,7 @@ Cygnus/
 │   └── task.md                 # phase-by-phase implementation checklist
 ├── scripts/
 │   └── hooks/
-│       └── pre-push            # blocks direct pushes to master
+│       └── pre-push            # blocks direct pushes to main
 ├── assets/                     # architecture diagrams, etc.
 └── CLAUDE.md                   # guidance for AI coding agents working in this repo
 ```
@@ -248,7 +248,7 @@ The ADK dev UI persists conversation state to `.adk/session.db` (gitignored).
 
 ## Development Workflow
 
-- The `master` branch is protected — all work happens on feature branches and lands via pull request.
+- The `main` branch is protected — all work happens on feature branches and lands via pull request.
 - Each agent's behavior lives in its system prompt (`src/prompts/`), not in code — prompt changes are the primary way agent behavior evolves.
 - When adding a new specialist agent: create `src/agents/<name>.py` + `src/prompts/<name>.py`, then register it in `orchestrator.py`'s `sub_agents` list and update its routing instructions in `src/prompts/orchestrator.py`.
 
