@@ -43,6 +43,21 @@ def sagittarius_url() -> str:
     return os.getenv("SAGITTARIUS_MCP_URL", _DEFAULT_URL)
 
 
+def mcp_auth_headers() -> dict[str, str]:
+    """The Authorization header to send on every MCP connection to Sagittarius.
+
+    MCP_BEARER_TOKEN is the same env var name and value Sagittarius reads to
+    enforce bearer auth on /mcp (Sagittarius#16 / B.3). With it unset, this
+    returns {} and every caller's behaviour is exactly what it was before
+    B.3 — this side must deploy and be confirmed working before Sagittarius
+    turns enforcement on, or every MCP call starts failing with 401.
+    """
+    token = os.getenv("MCP_BEARER_TOKEN")
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
 def sagittarius_timeout() -> float:
     raw = os.getenv("SAGITTARIUS_TIMEOUT_SECONDS")
     if not raw:
@@ -62,6 +77,7 @@ def sagittarius_connection_params() -> StreamableHTTPConnectionParams:
     return StreamableHTTPConnectionParams(
         url=sagittarius_url(),
         timeout=sagittarius_timeout(),
+        headers=mcp_auth_headers() or None,
     )
 
 

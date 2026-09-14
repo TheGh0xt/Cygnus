@@ -13,6 +13,7 @@ These pin the timeout so nobody re-inherits the default by accident.
 import pytest
 
 from src.config import (
+    mcp_auth_headers,
     sagittarius_connection_params,
     sagittarius_timeout,
     sagittarius_url,
@@ -24,6 +25,7 @@ from src.config import (
 def clean_env(monkeypatch):
     monkeypatch.delenv("SAGITTARIUS_MCP_URL", raising=False)
     monkeypatch.delenv("SAGITTARIUS_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("MCP_BEARER_TOKEN", raising=False)
 
 
 class TestTimeout:
@@ -57,6 +59,35 @@ class TestConnectionParams:
 class TestUrl:
     def test_defaults_to_localhost(self):
         assert sagittarius_url() == "http://localhost:8080/mcp"
+
+
+class TestMcpAuthHeaders:
+    """B.3, client side: Cygnus must send the same bearer token Sagittarius
+    enforces on /mcp — same env var name and value, MCP_BEARER_TOKEN."""
+
+    def test_unset_produces_no_headers(self):
+        # Behaviour must be unchanged while the token is unset: Sagittarius
+        # isn't enforcing yet, and B.3's own rollout note says this side must
+        # deploy before Sagittarius turns enforcement on.
+        assert mcp_auth_headers() == {}
+
+    def test_set_produces_the_bearer_header(self, monkeypatch):
+        monkeypatch.setenv("MCP_BEARER_TOKEN", "secret-token")
+        assert mcp_auth_headers() == {"Authorization": "Bearer secret-token"}
+
+    def test_empty_string_is_treated_as_unset(self, monkeypatch):
+        monkeypatch.setenv("MCP_BEARER_TOKEN", "")
+        assert mcp_auth_headers() == {}
+
+
+class TestConnectionParamsCarryAuth:
+    def test_no_headers_when_token_unset(self):
+        assert sagittarius_connection_params().headers is None
+
+    def test_headers_carry_the_bearer_token(self, monkeypatch):
+        monkeypatch.setenv("MCP_BEARER_TOKEN", "secret-token")
+        params = sagittarius_connection_params()
+        assert params.headers == {"Authorization": "Bearer secret-token"}
 
 
 class TestWarmUp:

@@ -240,6 +240,19 @@ def run_evaluation_cycle(
     )
 
 
+def _mcp_http_client(headers: dict[str, str]):
+    """The httpx.AsyncClient to hand to streamable_http_client, or None.
+
+    None when there's nothing to add: streamable_http_client then builds its
+    own default client, matching behaviour from before B.3 exactly. Split out
+    from _fetch so the auth wiring is unit-testable without a live MCP
+    session — _fetch's handshake and call_tool flow stay e2e-only.
+    """
+    import httpx
+
+    return httpx.AsyncClient(headers=headers) if headers else None
+
+
 class SagittariusPriceFetcher:
     """Fetches the current probability of a market via Sagittarius MCP.
 
@@ -248,8 +261,12 @@ class SagittariusPriceFetcher:
     EventIntelligenceContext.
     """
 
-    def __init__(self, mcp_url: str):
+    def __init__(self, mcp_url: str, headers: dict[str, str] | None = None):
         self.mcp_url = mcp_url
+        # B.3: the same bearer token Sagittarius enforces on /mcp. This is
+        # the worker's own MCP client — separate from the agents' toolsets
+        # in ../config.py — so it needs the header wired in independently.
+        self._headers = headers or {}
 
     def current_probability(self, market_slug: str) -> float | None:
         import asyncio
@@ -260,9 +277,14 @@ class SagittariusPriceFetcher:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
 
+        http_client = _mcp_http_client(self._headers)
         try:
             async with (
-                streamable_http_client(self.mcp_url) as (read, write, _),
+                streamable_http_client(self.mcp_url, http_client=http_client) as (
+                    read,
+                    write,
+                    _,
+                ),
                 ClientSession(read, write) as session,
             ):
                 await session.initialize()
@@ -296,6 +318,8 @@ class SagittariusPriceFetcher:
 def main() -> None:
     import os
 
+    from ..config import mcp_auth_headers
+
     parser = argparse.ArgumentParser(description="PMIE T+48h evaluation worker")
     parser.add_argument(
         "--db", required=True, help="path to the memory store SQLite db"
@@ -304,7 +328,8 @@ def main() -> None:
 
     store = build_memory_store(args.db)
     fetcher = SagittariusPriceFetcher(
-        os.getenv("SAGITTARIUS_MCP_URL", "http://localhost:8080/mcp")
+        os.getenv("SAGITTARIUS_MCP_URL", "http://localhost:8080/mcp"),
+        headers=mcp_auth_headers(),
     )
     logging.basicConfig(
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
