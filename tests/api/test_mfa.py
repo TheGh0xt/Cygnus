@@ -1,6 +1,13 @@
 import pytest
 
-from src.api.mfa import EnrollResult, FactorStatus, InvalidCode, MfaError, SupabaseMfa
+from src.api.mfa import (
+    EnrollResult,
+    FactorLookup,
+    FactorStatus,
+    InvalidCode,
+    MfaError,
+    SupabaseMfa,
+)
 
 
 class FakeResponse:
@@ -82,6 +89,25 @@ class TestVerify:
             "code": "123456",
         }
 
+    def test_works_for_an_already_verified_factor_not_just_first_enrolment(self):
+        # A login-time step-up challenge on a factor verified long ago must
+        # succeed the same way a first-enrolment confirmation does —
+        # verify() takes no "is this the first time" input, so there is
+        # nothing that could make it behave differently for the two cases.
+        mfa = FakeMfa()
+        mfa.responses = [
+            FakeResponse(200, {"id": "challenge-2"}),
+            FakeResponse(200, {"access_token": "stepped-up-session-token"}),
+        ]
+
+        mfa.verify("user-token", "already-verified-factor", "654321")
+
+        assert mfa.calls[0][:3] == (
+            "POST",
+            "/factors/already-verified-factor/challenge",
+            "user-token",
+        )
+
     def test_wrong_code_raises_invalid_code(self):
         mfa = FakeMfa()
         mfa.responses = [
@@ -144,3 +170,83 @@ def test_not_configured_raises():
     mfa = SupabaseMfa(base_url="", service_key="")
     with pytest.raises(MfaError, match="not configured"):
         mfa.enroll("user-token")
+
+
+class FakeFactorLookup(FactorLookup):
+    def __init__(self, ttl_seconds: float = 60, clock=None):
+        super().__init__(
+            base_url="https://example.test",
+            service_key="service-key",
+            ttl_seconds=ttl_seconds,
+        )
+        self.fetch_calls: list[str] = []
+        self.fetch_results: list[object] = []
+        self._clock = clock or (lambda: 0.0)
+
+    def _now(self) -> float:
+        return self._clock()
+
+    def _fetch(self, user_id: str) -> bool:
+        self.fetch_calls.append(user_id)
+        result = self.fetch_results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+class TestFactorLookup:
+    def test_not_configured_raises(self):
+        lookup = FactorLookup(base_url="", service_key="")
+        with pytest.raises(MfaError, match="not configured"):
+            lookup.has_verified_totp_factor("user-1")
+
+    def test_true_when_a_verified_totp_factor_exists(self):
+        lookup = FakeFactorLookup()
+        lookup.fetch_results = [True]
+        assert lookup.has_verified_totp_factor("user-1") is True
+
+    def test_false_when_no_verified_factor(self):
+        lookup = FakeFactorLookup()
+        lookup.fetch_results = [False]
+        assert lookup.has_verified_totp_factor("user-1") is False
+
+    def test_caches_within_the_ttl(self):
+        lookup = FakeFactorLookup(ttl_seconds=60)
+        lookup.fetch_results = [True]
+        assert lookup.has_verified_totp_factor("user-1") is True
+        assert lookup.has_verified_totp_factor("user-1") is True
+        assert lookup.fetch_calls == ["user-1"]
+
+    def test_refetches_after_the_ttl_expires(self):
+        clock = {"t": 0.0}
+        lookup = FakeFactorLookup(ttl_seconds=60, clock=lambda: clock["t"])
+        lookup.fetch_results = [True, False]
+
+        assert lookup.has_verified_totp_factor("user-1") is True
+        clock["t"] = 61.0
+        assert lookup.has_verified_totp_factor("user-1") is False
+        assert lookup.fetch_calls == ["user-1", "user-1"]
+
+    def test_a_failed_lookup_raises_rather_than_defaulting_to_false(self):
+        """Fail closed: an outage must not silently look like "not enrolled"."""
+        lookup = FakeFactorLookup()
+        lookup.fetch_results = [MfaError("unreachable")]
+        with pytest.raises(MfaError):
+            lookup.has_verified_totp_factor("user-1")
+
+    def test_invalidate_forces_a_fresh_fetch(self):
+        lookup = FakeFactorLookup()
+        lookup.fetch_results = [False, True]
+
+        assert lookup.has_verified_totp_factor("user-1") is False
+        lookup.invalidate("user-1")
+        assert lookup.has_verified_totp_factor("user-1") is True
+        assert lookup.fetch_calls == ["user-1", "user-1"]
+
+    def test_caches_are_independent_per_user(self):
+        lookup = FakeFactorLookup()
+        lookup.fetch_results = [True, False]
+
+        assert lookup.has_verified_totp_factor("user-1") is True
+        assert lookup.has_verified_totp_factor("user-2") is False
+        assert lookup.fetch_calls == ["user-1", "user-2"]

@@ -86,6 +86,14 @@ class TestEnrollRoute:
         assert response.status_code == 503
 
 
+class FakeFactorLookup:
+    def __init__(self):
+        self.invalidated: list[str] = []
+
+    def invalidate(self, user_id):
+        self.invalidated.append(user_id)
+
+
 class TestVerifyRoute:
     def test_activates_the_factor(self, client):
         client.app.state.mfa = FakeMfa()
@@ -100,6 +108,32 @@ class TestVerifyRoute:
         body = response.json()
         assert body["enrolled"] is True
         assert body["verified_at"] is not None
+
+    def test_invalidates_the_gate_s_factor_cache_on_success(self, client):
+        client.app.state.mfa = FakeMfa()
+        lookup = FakeFactorLookup()
+        client.app.state.mfa_factor_lookup = lookup
+
+        client.post(
+            "/v1/me/mfa/verify",
+            headers=AUTH,
+            json={"factor_id": "factor-1", "code": "123456"},
+        )
+
+        assert lookup.invalidated == ["00000000-0000-0000-0000-000000000000"]
+
+    def test_does_not_invalidate_on_a_failed_verify(self, client):
+        client.app.state.mfa = FakeMfa(verify_error=InvalidCode("bad code"))
+        lookup = FakeFactorLookup()
+        client.app.state.mfa_factor_lookup = lookup
+
+        client.post(
+            "/v1/me/mfa/verify",
+            headers=AUTH,
+            json={"factor_id": "factor-1", "code": "000000"},
+        )
+
+        assert lookup.invalidated == []
 
     def test_wrong_code_is_422(self, client):
         client.app.state.mfa = FakeMfa(verify_error=InvalidCode("bad code"))

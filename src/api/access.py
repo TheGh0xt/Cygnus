@@ -31,6 +31,7 @@ from fastapi import Request
 
 from .auth import AuthError, CurrentUser, extract_bearer_token
 from .errors import ErrorType, PmieError
+from .mfa import MfaError
 
 logger = logging.getLogger("cygnus.api.access")
 
@@ -56,6 +57,20 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
 OPTIONAL_AUTH_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
         ("GET", "/v1/analyses/{analysis_id}"),
+    }
+)
+
+# A caller with a *verified* TOTP factor who has not stepped up to aal2 may
+# reach only what lets them get there. `POST /v1/me/mfa/enroll` is
+# deliberately absent: an aal1 (password-only) token belonging to a user who
+# already has a verified factor must not be able to enroll a second one —
+# that would let a stolen password-only token add an attacker's own
+# authenticator. A first-time enrollment still works at aal1, because
+# has_verified_totp_factor is False until one exists.
+AAL2_EXEMPT_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("POST", "/v1/me/mfa/verify"),
+        ("GET", "/v1/me/mfa"),
     }
 )
 
@@ -96,7 +111,7 @@ def get_current_user(request: Request) -> CurrentUser | None:
 
     try:
         token = extract_bearer_token(header)
-        return request.app.state.jwks.verify(token)
+        user = request.app.state.jwks.verify(token)
     except AuthError as exc:
         raise PmieError(
             ErrorType.INVALID_REQUEST, "Sign in to continue.", status=401
@@ -111,8 +126,44 @@ def get_current_user(request: Request) -> CurrentUser | None:
             status=503,
         ) from exc
 
+    if user.aal != "aal2" and key not in AAL2_EXEMPT_ROUTES:
+        _require_step_up_if_enrolled(request, user)
+
+    return user
+
+
+def _require_step_up_if_enrolled(request: Request, user: CurrentUser) -> None:
+    """401 an aal1 caller who has a verified TOTP factor.
+
+    Silent no-op when MFA lookup isn't configured at all — the same posture
+    Accounts/Growth take toward their own "not configured" case elsewhere in
+    this app. Blocking every authenticated request because a deployment
+    hasn't wired MFA would be a far bigger outage than the feature this
+    protects. A *configured* lookup that fails, though, is fail-closed: an
+    admin-API outage must not silently look like "not enrolled".
+    """
+    lookup = getattr(request.app.state, "mfa_factor_lookup", None)
+    if lookup is None or not lookup.configured:
+        return
+    try:
+        enrolled = lookup.has_verified_totp_factor(user.id)
+    except MfaError as exc:
+        logger.exception("could not check MFA enrolment for %s", user.id)
+        raise PmieError(
+            ErrorType.INTERNAL_ERROR,
+            "Could not verify your MFA status. Try again shortly.",
+            status=503,
+        ) from exc
+    if enrolled:
+        raise PmieError(
+            ErrorType.MFA_REQUIRED,
+            "Complete TOTP verification to continue.",
+            status=401,
+        )
+
 
 __all__ = [
+    "AAL2_EXEMPT_ROUTES",
     "OPTIONAL_AUTH_ROUTES",
     "PUBLIC_ROUTES",
     "get_current_user",

@@ -580,7 +580,8 @@
             "type": "string"
           },
           "recovery_codes": {
-            "description": "Single-use fallbacks. Shown once, stored hashed.",
+            "deprecated": true,
+            "description": "Always empty. Supabase Auth's MFA API has no recovery-code concept; recovery is a second, backup TOTP factor instead \u2014 enroll again while already verified (at aal2).",
             "items": {
               "type": "string"
             },

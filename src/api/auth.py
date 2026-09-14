@@ -45,6 +45,11 @@ class AuthError(Exception):
 class CurrentUser:
     id: str
     email: str | None
+    # Authenticator Assurance Level. "aal1" is password-only; "aal2" means
+    # this session itself completed an MFA challenge. Absent on a token
+    # minted before MFA existed for this user, which is why it defaults to
+    # the lower level rather than failing to decode.
+    aal: str = "aal1"
 
 
 def supabase_url() -> str:
@@ -98,7 +103,11 @@ def decode_token(token: str, jwks: dict) -> CurrentUser:
     if not subject:
         raise AuthError("token has no subject")
 
-    return CurrentUser(id=str(subject), email=claims.get("email"))
+    return CurrentUser(
+        id=str(subject),
+        email=claims.get("email"),
+        aal=claims.get("aal") or "aal1",
+    )
 
 
 class JwksCache:

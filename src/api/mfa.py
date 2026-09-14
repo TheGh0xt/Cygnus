@@ -24,6 +24,7 @@ can't change here — is returned as an empty list until that's decided.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -109,11 +110,16 @@ class SupabaseMfa:
         return EnrollResult(factor_id=factor_id, secret=secret, qr_uri=qr_uri)
 
     def verify(self, user_token: str, factor_id: str, code: str) -> None:
-        """Confirm a just-enrolled factor with a TOTP code.
+        """Confirm a TOTP code against a challenge on this factor.
 
         Two round trips because that is Supabase's own protocol: a challenge
         must exist before a code can be checked against it, so a stale or
         replayed code can't be verified without a fresh challenge in play.
+
+        Identical whether `factor_id` was just created (first enrolment) or
+        has been verified before (a login-time step-up challenge) — Supabase
+        does not distinguish the two, and neither does this method. See
+        TestVerify.test_works_for_an_already_verified_factor_not_just_first_enrolment.
         """
         challenge = self._request(
             "POST", f"/factors/{factor_id}/challenge", user_token, json={}
@@ -160,8 +166,90 @@ class SupabaseMfa:
         return FactorStatus(enrolled=True, verified_at=verified.get("updated_at"))
 
 
+class FactorLookup:
+    """Whether a user has a verified TOTP factor — for the auth gate only.
+
+    Used to decide whether an aal1 (password-only) token must be rejected
+    (see access.py): a caller with a verified factor who has not stepped up
+    to aal2 must not reach anything but the verify/status endpoints. Looking
+    this up per request would be a network round trip on every call, so
+    results are cached per user for `ttl_seconds`.
+
+    Uses GoTrue's admin API (`GET /auth/v1/admin/users/{id}`), authenticated
+    with the service role key for both `apikey` and `Authorization` — unlike
+    SupabaseMfa above, this is not acting as the caller; it is Cygnus asking
+    "does this user id have MFA" as an administrator.
+
+    A failed lookup raises rather than returning `False`: silently treating
+    an outage as "not enrolled" would let anyone route around MFA by timing
+    a request against a flaky network.
+    """
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        service_key: str | None = None,
+        ttl_seconds: float = 60,
+    ):
+        self._base_url = (base_url or supabase_url()).rstrip("/")
+        self._service_key = service_key or supabase_secret_key()
+        self._ttl = ttl_seconds
+        self._cache: dict[str, tuple[float, bool]] = {}
+
+    @property
+    def configured(self) -> bool:
+        return bool(self._base_url and self._service_key)
+
+    def _now(self) -> float:
+        return time.time()
+
+    def _fetch(self, user_id: str) -> bool:
+        if not self.configured:
+            raise MfaError("Supabase is not configured")
+        try:
+            response = httpx.get(
+                f"{self._base_url}/auth/v1/admin/users/{user_id}",
+                headers={
+                    "apikey": self._service_key,
+                    "authorization": f"Bearer {self._service_key}",
+                },
+                timeout=10,
+            )
+        except httpx.HTTPError as exc:
+            raise MfaError(f"Supabase Auth admin unreachable: {exc}") from exc
+        if response.status_code >= 400:
+            raise MfaError(
+                f"admin user lookup failed: {response.status_code} "
+                f"{response.text[:200]}"
+            )
+        factors = response.json().get("factors") or []
+        return any(
+            f.get("factor_type") == "totp" and f.get("status") == "verified"
+            for f in factors
+        )
+
+    def has_verified_totp_factor(self, user_id: str) -> bool:
+        now = self._now()
+        cached = self._cache.get(user_id)
+        if cached is not None and now - cached[0] < self._ttl:
+            return cached[1]
+        result = self._fetch(user_id)
+        self._cache[user_id] = (now, result)
+        return result
+
+    def invalidate(self, user_id: str) -> None:
+        """Drop a cached result so the next check re-fetches immediately.
+
+        Called right after a successful `verify()`: a user's very first
+        enrolment can otherwise leave a stale "not enrolled" cached from a
+        check made moments earlier in the same flow, for up to `ttl_seconds`.
+        """
+        self._cache.pop(user_id, None)
+
+
 __all__ = [
     "EnrollResult",
+    "FactorLookup",
     "FactorStatus",
     "InvalidCode",
     "MfaError",

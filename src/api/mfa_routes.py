@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Request
 
 from .access import get_current_user
-from .auth import extract_bearer_token
+from .auth import CurrentUser, extract_bearer_token
 from .errors import ErrorType, PmieError
 from .mfa import InvalidCode, MfaError
 from .models import (
@@ -106,7 +106,11 @@ def enroll_mfa(request: Request) -> MfaEnrollResponse:
         422: {"description": "The code is incorrect or has expired", **PROBLEM},
     },
 )
-def verify_mfa(body: MfaVerifyRequest, request: Request) -> MfaStatusResponse:
+def verify_mfa(
+    body: MfaVerifyRequest,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+) -> MfaStatusResponse:
     mfa = request.app.state.mfa
     if not mfa.configured:
         raise PmieError(ErrorType.INTERNAL_ERROR, "MFA is not configured.", status=503)
@@ -125,6 +129,13 @@ def verify_mfa(body: MfaVerifyRequest, request: Request) -> MfaStatusResponse:
         raise PmieError(
             ErrorType.INTERNAL_ERROR, "Could not verify that code.", status=503
         ) from exc
+
+    # The auth gate's factor-lookup cache (access.py) can otherwise hold a
+    # stale "not enrolled" result from a check made moments earlier in the
+    # same flow, for up to its TTL.
+    lookup = getattr(request.app.state, "mfa_factor_lookup", None)
+    if lookup is not None:
+        lookup.invalidate(user.id)
 
     return MfaStatusResponse(enrolled=True, verified_at=datetime.now(UTC))
 
