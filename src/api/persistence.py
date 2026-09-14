@@ -39,7 +39,13 @@ class ReportPersistence:
         self._store = store
         self._price_fetcher = price_fetcher
 
-    def save(self, report: dict | MarketAnalysisReport, slug: str) -> None:
+    def save(self, report: dict | MarketAnalysisReport, slug: str) -> int | None:
+        """Persist a report and return the store's row id, or None if skipped.
+
+        The id is what a share token points at (see sharing.py) — capturing
+        it here, at the only place the store's insert actually happens, is
+        what lets a share link outlive the in-memory analysis record.
+        """
         validated = (
             report
             if isinstance(report, MarketAnalysisReport)
@@ -59,15 +65,17 @@ class ReportPersistence:
                 "not storing an unscoreable report: no market_id and no slug. "
                 "The analysis ran without market data."
             )
-            return
+            return None
 
         price = self._fetch_price(slug)
-        self._store.save_report(validated, slug or "", price)
+        report_id = self._store.save_report(validated, slug or "", price)
         logger.info(
-            "persisted report for %s (price %s)",
+            "persisted report %s for %s (price %s)",
+            report_id,
             slug or "<unknown slug>",
             "unavailable" if price is None else price,
         )
+        return report_id
 
     def _fetch_price(self, slug: str) -> float | None:
         if not slug:

@@ -2,6 +2,11 @@
 
 Kept separate from routes.py so the auth rules can be read — and changed — in
 one place rather than being scattered across endpoint signatures.
+
+Identity itself (verifying the bearer token, or rejecting its absence) now
+lives in access.py as a fail-closed `Depends` — see that module's docstring.
+What remains here is *authorization*: rules that need a profile, not just a
+verified token.
 """
 
 from __future__ import annotations
@@ -11,39 +16,10 @@ import logging
 from fastapi import Request
 
 from .accounts import AccountsError, Profile
-from .auth import AuthError, CurrentUser, extract_bearer_token
+from .auth import CurrentUser
 from .errors import ErrorType, PmieError
 
 logger = logging.getLogger("cygnus.api.dependencies")
-
-
-def current_user(request: Request) -> CurrentUser:
-    """The verified caller, or a 401.
-
-    Auth can be disabled for local development via PMIE_AUTH_DISABLED, which
-    is why that flag is read from app state set at startup rather than from
-    the environment here — a stray env var must not be able to switch off
-    authentication in a deployed process.
-    """
-    if getattr(request.app.state, "auth_disabled", False):
-        return CurrentUser(id="00000000-0000-0000-0000-000000000000", email=None)
-
-    try:
-        token = extract_bearer_token(request.headers.get("authorization"))
-        return request.app.state.jwks.verify(token)
-    except AuthError as exc:
-        raise PmieError(
-            ErrorType.INVALID_REQUEST, "Sign in to continue.", status=401
-        ) from exc
-    except Exception as exc:
-        # A JWKS fetch failure is our problem, not the caller's, and must not
-        # be reported as bad credentials.
-        logger.exception("could not verify token")
-        raise PmieError(
-            ErrorType.INTERNAL_ERROR,
-            "Could not verify your session. Try again shortly.",
-            status=503,
-        ) from exc
 
 
 def require_invited(request: Request, user: CurrentUser) -> Profile:
