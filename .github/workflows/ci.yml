@@ -54,8 +54,8 @@ jobs:
         # A stale file means the client and the server disagree silently.
         run: |
           python scripts/export_openapi.py
-          git diff --exit-code -- openapi.json \
-            || { echo "::error::openapi.json is stale — run 'python scripts/export_openapi.py' and commit."; exit 1; }
+          git diff --exit-code -- openapi.json contract.sha256 \
+            || { echo "::error::openapi.json or contract.sha256 is stale — run 'python scripts/export_openapi.py' and commit, then sync both files into Lyra."; exit 1; }
 
   no-network-guard:
     name: hermetic test guard
