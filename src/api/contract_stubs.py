@@ -17,7 +17,6 @@ implement it, and delete it from here. This file should shrink to nothing. If
 it stops shrinking, the freeze has become a backlog.
 
 Owners, by ROADMAP §0b task:
-    B.6   share tokens              → sharing
     B.7   TOTP enrolment            → auth/MFA
     B.10  referrals, quota, intent  → accounts
     B.11  explanation calibration   → evaluation
@@ -39,7 +38,6 @@ from .models import (
     MovingMarketsResponse,
     PayIntentRequest,
     ReferralSummary,
-    ShareTokenResponse,
     UserEventRequest,
     WaitlistRequest,
     WaitlistResponse,
@@ -145,29 +143,6 @@ async def record_event(_body: UserEventRequest) -> None:
 )
 async def join_waitlist(_body: WaitlistRequest) -> WaitlistResponse:
     _stub("B.15")
-
-
-# ── B.6 — share tokens ───────────────────────────────────────────────────────
-
-
-@router.post(
-    "/analyses/{analysis_id}/share",
-    response_model=ShareTokenResponse,
-    responses=_RESPONSES,
-    summary="Mint a public read-only link for a report",
-)
-async def create_share_token(analysis_id: str) -> ShareTokenResponse:
-    _stub("B.6")
-
-
-@router.delete(
-    "/analyses/{analysis_id}/share",
-    status_code=204,
-    responses=_RESPONSES,
-    summary="Revoke a report's public link",
-)
-async def revoke_share_token(analysis_id: str) -> None:
-    _stub("B.6")
 
 
 # ── B.11 — explanation calibration ───────────────────────────────────────────

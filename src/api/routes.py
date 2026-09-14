@@ -4,12 +4,14 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
+from .access import get_current_user
 from .accounts import FREE_MONTHLY_ANALYSES, AccountsError
+from .auth import CurrentUser
 from .config import describe_supabase_config
-from .dependencies import current_user, require_invited
+from .dependencies import require_invited
 from .errors import ErrorType, PmieError
 from .models import (
     AnalysisCreated,
@@ -42,7 +44,12 @@ _AUTH_ERRORS = {
 
 logger = logging.getLogger("cygnus.api.routes")
 
-router = APIRouter(prefix="/v1")
+# Every route on this router requires a verified caller. Authorization used to
+# be imperative — a handler was protected only if someone remembered to call
+# current_user() in its body — which is how this endpoint's own GET and SSE
+# stream shipped unauthenticated. Attaching it here inverts the default: a new
+# route is closed unless it is named in access.PUBLIC_ROUTES.
+router = APIRouter(prefix="/v1", dependencies=[Depends(get_current_user)])
 
 
 @router.get("/health", response_model=HealthResponse, summary="Liveness")
@@ -81,13 +88,16 @@ async def ready(request: Request) -> dict:
         429: {"description": "Rate limit exceeded", **PROBLEM},
     },
 )
-async def create_analysis(body: AnalysisRequest, request: Request):
+async def create_analysis(
+    body: AnalysisRequest,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+):
     """Starts a run and returns immediately with a stream URL.
 
     A full analysis takes 60-120 seconds across four stages, so the work
     happens in the background and progress arrives over the SSE endpoint.
     """
-    user = current_user(request)
     require_invited(request, user)
 
     # After the invite check, so an uninvited caller is told that rather than
@@ -120,7 +130,7 @@ async def create_analysis(body: AnalysisRequest, request: Request):
             status=422,
         )
 
-    record = registry.create(body.query)
+    record = registry.create(body.query, profile_id=user.id)
 
     # Keep a reference: a bare create_task can be garbage-collected mid-run,
     # which would silently strand the analysis in "running".
@@ -137,13 +147,73 @@ async def create_analysis(body: AnalysisRequest, request: Request):
     )
 
 
-@router.get("/analyses/{analysis_id}", response_model=AnalysisResult)
-async def get_analysis(analysis_id: str, request: Request):
+def _share_token_grants(request, token: str | None, report_id: int | None) -> bool:
+    """Whether this token is a live link to this specific report.
+
+    report_id, not analysis_id: the in-process analysis record dies with the
+    worker, while a share link has to keep meaning the same thing afterwards,
+    so tokens are minted against the durable store row (see sharing.py).
+    An unpersisted analysis has no report_id and can never be reached by a
+    token — which is also why sharing_routes refuses to mint one.
+    """
+    if not token or report_id is None:
+        return False
+    sharing = getattr(request.app.state, "sharing", None)
+    if sharing is None or not sharing.configured:
+        return False
+    return sharing.resolve(token) == report_id
+
+
+@router.get(
+    "/analyses/{analysis_id}",
+    response_model=AnalysisResult,
+    responses={
+        **_AUTH_ERRORS,
+        404: {"description": "No such analysis", **PROBLEM},
+    },
+)
+async def get_analysis(
+    analysis_id: str,
+    request: Request,
+    share_token: str | None = Query(
+        None, description="A link minted by the owner via POST .../share."
+    ),
+    user: CurrentUser | None = Depends(get_current_user),
+):
+    """The finished report, for its owner or for a holder of a share link.
+
+    This route is listed in access.OPTIONAL_AUTH_ROUTES, so an anonymous
+    caller reaches this handler rather than being rejected outright — a
+    shared report is meant to be readable without an account (UI_PRD 6.7).
+    Everything else is decided here.
+
+    Order matters. Ownership is checked first so the owner never depends on a
+    token; a share token is checked second; and only then does a signed-in
+    stranger get 403 while an anonymous one gets 401. Collapsing those two
+    would either tell an anonymous caller that a report exists, or tell a
+    signed-in user to sign in again.
+    """
     record = request.app.state.registry.get(analysis_id)
     if record is None:
         raise PmieError(
             ErrorType.ANALYSIS_NOT_FOUND, f"no analysis {analysis_id}", status=404
         )
+
+    if user is not None and record.profile_id == user.id:
+        pass
+    elif _share_token_grants(request, share_token, record.report_id):
+        pass
+    elif user is not None:
+        raise PmieError(
+            ErrorType.INVALID_REQUEST,
+            "This analysis belongs to another account.",
+            status=403,
+        )
+    else:
+        # Deliberately identical to "not signed in": a revoked, expired or
+        # invented token must not become an oracle for which analyses exist.
+        raise PmieError(ErrorType.INVALID_REQUEST, "Sign in to continue.", status=401)
+
     return AnalysisResult(
         analysis_id=record.analysis_id,
         status=record.status.value,
@@ -170,11 +240,26 @@ async def get_analysis(analysis_id: str, request: Request):
         }
     },
 )
-async def stream_analysis(analysis_id: str, request: Request):
+async def stream_analysis(
+    analysis_id: str,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Live stage events, for the owner only.
+
+    No share-token exception, deliberately: a link shares a finished report,
+    not a live view of someone else's run in progress.
+    """
     record = request.app.state.registry.get(analysis_id)
     if record is None:
         raise PmieError(
             ErrorType.ANALYSIS_NOT_FOUND, f"no analysis {analysis_id}", status=404
+        )
+    if record.profile_id != user.id:
+        raise PmieError(
+            ErrorType.INVALID_REQUEST,
+            "This analysis belongs to another account.",
+            status=403,
         )
 
     async def generator():
@@ -198,13 +283,12 @@ async def stream_analysis(analysis_id: str, request: Request):
     summary="The signed-in user",
     responses=_AUTH_ERRORS,
 )
-async def me(request: Request) -> dict:
+async def me(request: Request, user: CurrentUser = Depends(get_current_user)) -> dict:
     """The caller's profile, interests and usage.
 
     One call so the client can render the whole authenticated shell — header,
     usage indicator, onboarding state — without a waterfall of requests.
     """
-    user = current_user(request)
     accounts = request.app.state.accounts
     if not accounts.configured:
         raise PmieError(
@@ -284,8 +368,11 @@ async def interest_categories(request: Request) -> dict:
         },
     },
 )
-async def set_interests(body: InterestsRequest, request: Request) -> dict:
-    user = current_user(request)
+async def set_interests(
+    body: InterestsRequest,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
     accounts = request.app.state.accounts
     try:
         saved = accounts.set_interests(user.id, body.categories)
@@ -301,14 +388,16 @@ async def set_interests(body: InterestsRequest, request: Request) -> dict:
     responses=_AUTH_ERRORS,
 )
 async def submit_feedback(
-    analysis_id: str, body: FeedbackRequest, request: Request
+    analysis_id: str,
+    body: FeedbackRequest,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
 ) -> None:
     """Useful / not useful on a report.
 
     Closes the gap left by Phase 1: the API contract listed this endpoint but
     it was never built, so the UI had nothing to call.
     """
-    user = current_user(request)
     accounts = request.app.state.accounts
     try:
         accounts.save_feedback(user.id, analysis_id, body.is_useful, body.note)

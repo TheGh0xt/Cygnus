@@ -1176,6 +1176,7 @@
     },
     "/v1/analyses/{analysis_id}": {
       "get": {
+        "description": "The finished report, for its owner or for a holder of a share link.\n\nThis route is listed in access.OPTIONAL_AUTH_ROUTES, so an anonymous\ncaller reaches this handler rather than being rejected outright \u2014 a\nshared report is meant to be readable without an account (UI_PRD 6.7).\nEverything else is decided here.\n\nOrder matters. Ownership is checked first so the owner never depends on a\ntoken; a share token is checked second; and only then does a signed-in\nstranger get 403 while an anonymous one gets 401. Collapsing those two\nwould either tell an anonymous caller that a report exists, or tell a\nsigned-in user to sign in again.",
         "operationId": "get_analysis_v1_analyses__analysis_id__get",
         "parameters": [
           {
@@ -1185,6 +1186,24 @@
             "schema": {
               "title": "Analysis Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "A link minted by the owner via POST .../share.",
+            "in": "query",
+            "name": "share_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A link minted by the owner via POST .../share.",
+              "title": "Share Token"
             }
           }
         ],
@@ -1199,6 +1218,39 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Signed in but not invited to the alpha"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "No such analysis"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1208,6 +1260,17 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
         "summary": "Get Analysis"
@@ -1215,6 +1278,7 @@
     },
     "/v1/analyses/{analysis_id}/events": {
       "get": {
+        "description": "Live stage events, for the owner only.\n\nNo share-token exception, deliberately: a link shares a finished report,\nnot a live view of someone else's run in progress.",
         "operationId": "stream_analysis_v1_analyses__analysis_id__events_get",
         "parameters": [
           {
@@ -1355,9 +1419,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "501": {
-            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
           }
         },
         "summary": "Revoke a report's public link"
@@ -1395,9 +1456,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "501": {
-            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
           }
         },
         "summary": "Mint a public read-only link for a report"

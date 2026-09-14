@@ -23,6 +23,8 @@ from .ratelimit import RateLimiter
 from .registry import AnalysisRegistry
 from .routes import router
 from .selfcheck import run_startup_checks
+from .sharing import ShareTokens
+from .sharing_routes import router as sharing_router
 
 
 def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
@@ -78,6 +80,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     accounts = Accounts()
     app.state.accounts = accounts
     app.state.jwks = JwksCache()
+    app.state.sharing = ShareTokens()
 
     # Auth is on by default. Disabling it is a startup-time decision captured
     # here, so a stray environment variable cannot switch off authentication
@@ -125,6 +128,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
 
     app.state.write_access = None
     app.include_router(router)
+    app.include_router(sharing_router)
     app.include_router(evaluation_router)
     app.include_router(generation_router)
     # Frozen contract: shapes agreed, logic pending. Each route 501s and

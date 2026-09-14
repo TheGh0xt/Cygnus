@@ -27,3 +27,16 @@ ignore = [
 # ADK discovers `root_agent` by importing the package, so the re-export in
 # __init__.py is load-bearing rather than dead.
 "__init__.py" = ["F401"]
+
+[tool.ruff.lint.flake8-bugbear]
+# B008 exists to catch mutable or expensive defaults evaluated once at import.
+# FastAPI's dependency injection is built on exactly that construct — the call
+# in the default *is* the declaration — so flagging it would mean either a
+# blanket noqa on every route or abandoning Depends. Neither is a real choice.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Body",
+]

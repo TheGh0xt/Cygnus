@@ -36,15 +36,26 @@ class AnalysisRecord:
     report: dict | None = None
     error: str | None = None
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    # Who started this run. None for system-generated analyses (the
+    # scheduled discovery cycle), which have no owner to check against.
+    profile_id: str | None = None
+    # The durable memory store's row id, set once persistence succeeds.
+    # Distinct from analysis_id: this record is in-process and ephemeral,
+    # while report_id is what a share token actually points at (see
+    # sharing.py) — a link that must keep meaning the same thing even though
+    # the in-memory record it was minted against will not survive a restart.
+    report_id: int | None = None
 
 
 class AnalysisRegistry:
     def __init__(self) -> None:
         self._records: dict[str, AnalysisRecord] = {}
 
-    def create(self, query: str) -> AnalysisRecord:
+    def create(self, query: str, profile_id: str | None = None) -> AnalysisRecord:
         analysis_id = uuid.uuid4().hex
-        record = AnalysisRecord(analysis_id=analysis_id, query=query)
+        record = AnalysisRecord(
+            analysis_id=analysis_id, query=query, profile_id=profile_id
+        )
         self._records[analysis_id] = record
         return record
 
@@ -63,6 +74,9 @@ class AnalysisRegistry:
         record = self._records[analysis_id]
         record.status = AnalysisStatus.FAILED
         record.error = error
+
+    def set_report_id(self, analysis_id: str, report_id: int) -> None:
+        self._records[analysis_id].report_id = report_id
 
     def publish(self, analysis_id: str, event: StageEvent) -> None:
         self._records[analysis_id].queue.put_nowait(event)

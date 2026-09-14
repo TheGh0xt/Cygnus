@@ -148,7 +148,7 @@ class AnalysisPipeline:
             # The pipeline accumulates state deltas from the events themselves,
             # so by this line the report is in hand. Persisting here removes
             # the dependency on ADK's internal ordering entirely.
-            self._persist(final, slug)
+            self._persist(analysis_id, final, slug)
 
             self._registry.publish(analysis_id, StageEvent("report", None, final))
         except Exception as exc:
@@ -187,7 +187,7 @@ class AnalysisPipeline:
                     tokens=usage,
                 )
 
-    def _persist(self, report: dict, slug: str) -> None:
+    def _persist(self, analysis_id: str, report: dict, slug: str) -> None:
         """Store a completed report with the price observed right now.
 
         Never raises into the run. The user has already waited a minute and a
@@ -199,7 +199,9 @@ class AnalysisPipeline:
         if self._persistence is None:
             return
         try:
-            self._persistence.save(report, slug)
+            report_id = self._persistence.save(report, slug)
+            if report_id is not None:
+                self._registry.set_report_id(analysis_id, report_id)
         except Exception:
             logger.critical(
                 "REPORT LOST — analysis for %s completed but could not be "
