@@ -18,6 +18,7 @@ from .errors import PmieError, problem_response
 from .evaluation_routes import router as evaluation_router
 from .generation_routes import router as generation_router
 from .growth import Growth
+from .growth_routes import authenticated_router as growth_authenticated_router
 from .growth_routes import router as growth_router
 from .logging import configure_logging, new_request_id, request_id_var
 from .mfa import SupabaseMfa, build_factor_lookup
@@ -143,6 +144,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     app.include_router(evaluation_router)
     app.include_router(generation_router)
     app.include_router(growth_router)
+    app.include_router(growth_authenticated_router)
     app.include_router(discovery_router)
     app.include_router(mfa_router)
     # Frozen contract: shapes agreed, logic pending. Each route 501s and

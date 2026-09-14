@@ -1539,6 +1539,17 @@
           "204": {
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1549,8 +1560,16 @@
             },
             "description": "Validation Error"
           },
-          "501": {
-            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
         "summary": "Record a product event (UI mode switch, analysis started)"

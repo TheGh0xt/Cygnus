@@ -19,11 +19,11 @@ it stops shrinking, the freeze has become a backlog.
 Owners, by ROADMAP §0b task:
     B.10  referrals, quota, intent  → accounts
     B.11  explanation calibration   → evaluation
-    B.19  UI-mode telemetry         → growth
 
 Already retired: B.15 (waitlist) — see growth.py / growth_routes.py.
 B.17 (moving-markets feed) — see discovery.py / discovery_routes.py.
 B.7 (TOTP) — see mfa.py / mfa_routes.py.
+B.19 (UI-mode telemetry) — see growth.py / growth_routes.py.
 """
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ from .models import (
     CalibrationResponse,
     PayIntentRequest,
     ReferralSummary,
-    UserEventRequest,
 )
 
 # Same fail-closed default as routes.py and sharing_routes.py: every stub
@@ -87,19 +86,6 @@ async def record_pay_intent(_body: PayIntentRequest) -> None:
     # No money moves during beta. This records that someone who had already
     # used the product wanted more of it at a stated price.
     _stub("B.10")
-
-
-# ── B.19 — UI-mode preference telemetry ──────────────────────────────────────
-
-
-@router.post(
-    "/events",
-    status_code=204,
-    responses=_RESPONSES,
-    summary="Record a product event (UI mode switch, analysis started)",
-)
-async def record_event(_body: UserEventRequest) -> None:
-    _stub("B.19")
 
 
 # ── B.11 — explanation calibration ───────────────────────────────────────────

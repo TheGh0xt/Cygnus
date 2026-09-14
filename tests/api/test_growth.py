@@ -67,3 +67,34 @@ def test_not_configured_raises():
     growth = Growth(base_url="", service_key="")
     with pytest.raises(GrowthError, match="not configured"):
         growth.join_waitlist("someone@example.com", None)
+
+
+class TestRecordEvent:
+    def test_writes_the_expected_row(self):
+        growth = FakeGrowth()
+        growth.record_event(
+            "profile-1", "ui_mode_switched", "TERMINAL", {"from": "CONVENTIONAL"}
+        )
+
+        method, path, kwargs = growth.calls[0]
+        assert (method, path) == ("POST", "/user_events")
+        assert kwargs["json"] == {
+            "profile_id": "profile-1",
+            "name": "ui_mode_switched",
+            "ui_mode": "TERMINAL",
+            "properties": {"from": "CONVENTIONAL"},
+        }
+
+    def test_ui_mode_is_optional(self):
+        growth = FakeGrowth()
+        growth.record_event("profile-1", "analysis_started", None, {})
+
+        _, _, kwargs = growth.calls[0]
+        assert kwargs["json"]["ui_mode"] is None
+
+    def test_raises_on_failure(self):
+        growth = FakeGrowth()
+        growth.next_response = FakeResponse(500, "internal error")
+
+        with pytest.raises(GrowthError):
+            growth.record_event("profile-1", "analysis_started", None, {})
