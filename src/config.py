@@ -81,6 +81,27 @@ def sagittarius_connection_params() -> StreamableHTTPConnectionParams:
     )
 
 
+def mcp_http_client(headers: dict[str, str] | None = None) -> httpx.AsyncClient | None:
+    """The httpx.AsyncClient to hand a raw `streamable_http_client(..., http_client=...)`
+    call, or None.
+
+    ADK's own StreamableHTTPConnectionParams takes `headers` directly (see
+    sagittarius_connection_params above); the plain `mcp` SDK function used by
+    Cygnus's own MCP clients — the evaluation worker and generation discovery
+    — does not, so those build the client by hand instead. Centralised here
+    so every raw MCP client goes through the same auth wiring; a caller
+    inventing its own client-construction logic is exactly how a bearer token
+    gets forgotten on one Sagittarius call site while every other one
+    enforces it.
+
+    None (not an empty-headers client) when there's nothing to add: the mcp
+    SDK then builds its own default client, matching behaviour from before
+    B.3 exactly.
+    """
+    resolved = headers if headers is not None else mcp_auth_headers()
+    return httpx.AsyncClient(headers=resolved) if resolved else None
+
+
 def warm_sagittarius(timeout: float = 60.0) -> bool:
     """Best-effort wake-up call at startup.
 

@@ -14,6 +14,7 @@ import pytest
 
 from src.config import (
     mcp_auth_headers,
+    mcp_http_client,
     sagittarius_connection_params,
     sagittarius_timeout,
     sagittarius_url,
@@ -88,6 +89,32 @@ class TestConnectionParamsCarryAuth:
         monkeypatch.setenv("MCP_BEARER_TOKEN", "secret-token")
         params = sagittarius_connection_params()
         assert params.headers == {"Authorization": "Bearer secret-token"}
+
+
+class TestMcpHttpClient:
+    """The httpx.AsyncClient builder shared by Cygnus's raw `mcp` SDK clients
+    — the evaluation worker and generation discovery — which take
+    http_client rather than headers directly. sagittarius_connection_params
+    (ADK's own toolsets) is covered separately above."""
+
+    def test_no_client_when_headers_empty(self):
+        # The mcp SDK builds its own default client in this case, matching
+        # behaviour from before B.3 exactly.
+        assert mcp_http_client({}) is None
+
+    def test_client_carries_the_bearer_header(self):
+        client = mcp_http_client({"Authorization": "Bearer secret-token"})
+        assert client is not None
+        assert client.headers["authorization"] == "Bearer secret-token"
+
+    def test_defaults_to_reading_mcp_bearer_token(self, monkeypatch):
+        monkeypatch.setenv("MCP_BEARER_TOKEN", "secret-token")
+        client = mcp_http_client()
+        assert client is not None
+        assert client.headers["authorization"] == "Bearer secret-token"
+
+    def test_defaults_to_none_when_unset(self):
+        assert mcp_http_client() is None
 
 
 class TestWarmUp:

@@ -6,6 +6,7 @@ from mcp.types import AudioContent, CallToolResult, TextContent
 from src.evaluation.worker import (
     CONFIDENCE_DECREMENT,
     CONFIDENCE_INCREMENT,
+    SagittariusPriceFetcher,
     _extract_probability_from_tool_result,
     evaluate_report,
     run_evaluation_cycle,
@@ -233,3 +234,21 @@ class TestACycleThatScoredNothingSaysWhy:
         assert result.reports_due == 2
         assert result.price_unavailable == 1
         assert result.is_degraded is True
+
+
+class TestSagittariusPriceFetcherAuth:
+    """The httpx-client-construction half of this (mcp_http_client) is shared
+    with generation discovery and tested once in test_sagittarius_config.py;
+    this covers only what's specific to this fetcher — storing what it was
+    given."""
+
+    def test_defaults_to_no_headers(self):
+        fetcher = SagittariusPriceFetcher("http://localhost:8080/mcp")
+        assert fetcher._headers == {}
+
+    def test_stores_the_given_headers(self):
+        fetcher = SagittariusPriceFetcher(
+            "http://localhost:8080/mcp",
+            headers={"Authorization": "Bearer secret-token"},
+        )
+        assert fetcher._headers == {"Authorization": "Bearer secret-token"}

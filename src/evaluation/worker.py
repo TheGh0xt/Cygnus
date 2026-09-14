@@ -240,19 +240,6 @@ def run_evaluation_cycle(
     )
 
 
-def _mcp_http_client(headers: dict[str, str]):
-    """The httpx.AsyncClient to hand to streamable_http_client, or None.
-
-    None when there's nothing to add: streamable_http_client then builds its
-    own default client, matching behaviour from before B.3 exactly. Split out
-    from _fetch so the auth wiring is unit-testable without a live MCP
-    session — _fetch's handshake and call_tool flow stay e2e-only.
-    """
-    import httpx
-
-    return httpx.AsyncClient(headers=headers) if headers else None
-
-
 class SagittariusPriceFetcher:
     """Fetches the current probability of a market via Sagittarius MCP.
 
@@ -277,7 +264,9 @@ class SagittariusPriceFetcher:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
 
-        http_client = _mcp_http_client(self._headers)
+        from ..config import mcp_http_client
+
+        http_client = mcp_http_client(self._headers)
         try:
             async with (
                 streamable_http_client(self.mcp_url, http_client=http_client) as (
