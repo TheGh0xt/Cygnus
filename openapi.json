@@ -1613,8 +1613,27 @@
             },
             "description": "Successful Response"
           },
-          "501": {
-            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
         "summary": "Markets moving now, in the user's categories"

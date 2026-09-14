@@ -47,6 +47,10 @@ class Candidate:
     category: str
     probability: float
     change_24h: float
+    # Read only by the personalised feed (B.17), not the scheduled generation
+    # cycle — defaulted so existing construction sites are unaffected.
+    volume_24h: float = 0.0
+    end_date: str | None = None
 
 
 @dataclass(frozen=True)
