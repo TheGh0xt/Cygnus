@@ -74,6 +74,7 @@ async def ready(request: Request) -> dict:
         "checks": {
             "report_store_writable": ("unknown" if check is None else check.status),
             "detail": None if check is None else check.detail,
+            "memory_backend": getattr(request.app.state, "memory_backend", "unknown"),
         },
     }
 

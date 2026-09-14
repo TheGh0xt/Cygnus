@@ -52,6 +52,22 @@ def supabase_secret_key() -> str:
     return ""
 
 
+def pmie_environment() -> str:
+    """The deploy environment, as an explicit choice rather than an inference.
+
+    Deliberately not derived from a platform var like RENDER: that would tie
+    "production" to a hosting decision instead of a decision someone made, and
+    would silently change meaning if the deploy target ever changes. Defaults
+    to "development" so every existing local/CI setup is unaffected until a
+    deploy explicitly sets PMIE_ENVIRONMENT=production.
+    """
+    return _clean(os.getenv("PMIE_ENVIRONMENT")).lower() or "development"
+
+
+def is_production() -> bool:
+    return pmie_environment() == "production"
+
+
 def describe_supabase_config() -> dict:
     """A safe summary for diagnostics — never the key itself."""
     key = supabase_secret_key()

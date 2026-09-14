@@ -9,6 +9,7 @@ selection rule.
 
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 
 from src.memory import build_memory_store
@@ -145,6 +146,66 @@ class TestStoreSelection:
         # A URL with no key cannot authenticate; failing over to SQLite beats
         # crashing at startup.
         monkeypatch.setenv("SUPABASE_URL", "https://example.test")
+        monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+        assert isinstance(
+            build_memory_store(str(tmp_path / "local.db")), SqliteMemoryStore
+        )
+
+
+class TestProductionRefusesSqliteFallback:
+    """B.13: production must fail startup rather than degrade to SQLite.
+
+    SQLite on a deployed instance sits on an ephemeral container disk — every
+    restart loses the price observed at report time, and that price cannot be
+    reconstructed later. The precedent this guards against is the 17-day
+    silent record_usage failure: a write that fails quietly instead of
+    stopping the process.
+    """
+
+    def test_missing_config_in_production_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PMIE_ENVIRONMENT", "production")
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
+        with pytest.raises(MemoryStoreError, match="production"):
+            build_memory_store(str(tmp_path / "unused.db"))
+
+    def test_unreachable_postgres_in_production_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PMIE_ENVIRONMENT", "production")
+        monkeypatch.setenv("SUPABASE_URL", "https://example.test")
+        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+
+        def unreachable(*args, **kwargs):
+            raise httpx.ConnectError("connection refused")
+
+        monkeypatch.setattr(httpx, "request", unreachable)
+
+        with pytest.raises(MemoryStoreError):
+            build_memory_store(str(tmp_path / "unused.db"))
+
+    def test_reachable_postgres_in_production_is_used(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PMIE_ENVIRONMENT", "production")
+        monkeypatch.setenv("SUPABASE_URL", "https://example.test")
+        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+
+        class FakeResponse:
+            status_code = 200
+            text = "[]"
+
+            @staticmethod
+            def json():
+                return []
+
+        monkeypatch.setattr(httpx, "request", lambda *a, **k: FakeResponse())
+
+        store = build_memory_store(str(tmp_path / "unused.db"))
+        assert isinstance(store, PostgresMemoryStore)
+
+    def test_non_production_is_unaffected(self, tmp_path, monkeypatch):
+        # Sanity check: the new production gate must not change behaviour
+        # anywhere else. No connectivity probe, no PMIE_ENVIRONMENT set.
+        monkeypatch.delenv("PMIE_ENVIRONMENT", raising=False)
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
         monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
         assert isinstance(
             build_memory_store(str(tmp_path / "local.db")), SqliteMemoryStore

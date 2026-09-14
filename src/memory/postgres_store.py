@@ -39,6 +39,8 @@ class MemoryStoreError(Exception):
 
 
 class PostgresMemoryStore:
+    backend = "postgres"
+
     def __init__(self, base_url: str | None = None, service_key: str | None = None):
         self._base_url = (base_url or supabase_url()).rstrip("/")
         self._service_key = service_key or supabase_secret_key()
@@ -70,6 +72,18 @@ class PostgresMemoryStore:
                 f"report store returned {response.status_code}: {response.text[:200]}"
             )
         return response
+
+    def ping(self) -> None:
+        """Prove the store is actually reachable, not just configured.
+
+        A URL and key can be set and still point at nothing — a typo'd
+        project ref, a paused project, a network partition. Cheapest possible
+        real round trip: one row, no filtering. `_request` already raises
+        MemoryStoreError on a connection failure or a non-2xx response, so
+        the caller (build_memory_store, in production) just needs to let that
+        propagate instead of catching it.
+        """
+        self._request("GET", _TABLE, params={"select": "id", "limit": 1})
 
     def save_report(
         self,
