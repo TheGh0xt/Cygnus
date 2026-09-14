@@ -87,6 +87,15 @@ class TestSaveReport:
         store.save_report(_report(), "slug", 0.5)
         assert "return=representation" in store.calls[0]["headers"]["prefer"]
 
+    def test_sends_stated_confidence_alongside_confidence(self):
+        # B.11: the two start equal, but only confidence_score moves later —
+        # stated_confidence_score is the fixed baseline calibration bins on.
+        store = RecordingStore(response=[[{"id": 1}]])
+        store.save_report(_report(confidence=0.72), "slug", 0.5)
+        payload = store.calls[0]["json"]
+        assert payload["stated_confidence_score"] == 0.72
+        assert payload["confidence_score"] == 0.72
+
 
 class TestDueForEvaluation:
     def test_filters_on_unevaluated_and_age(self):
@@ -96,6 +105,56 @@ class TestDueForEvaluation:
         params = store.calls[0]["params"]
         assert params["evaluated_at"] == "is.null"
         assert params["created_at"] == f"lte.{(now - timedelta(hours=48)).isoformat()}"
+
+
+def _row(**overrides) -> dict:
+    row = {
+        "id": 1,
+        "market_id": "0xabc",
+        "market_slug": "slug",
+        # confidence_score and the embedded report_json are kept in sync, the
+        # way record_evaluation/record_checkpoint always update both — the
+        # report's own confidence is the current (adjusted) value.
+        "report_json": _report(confidence=0.9).model_dump(mode="json"),
+        "price_at_report": 0.5,
+        "created_at": "2026-08-13T12:00:00+00:00",
+        "evaluated_at": "2026-08-15T12:00:00+00:00",
+        "outcome": "CONFIRMED",
+        "confidence_score": 0.9,
+        "stated_confidence_score": 0.8,
+    }
+    row.update(overrides)
+    return row
+
+
+class TestGetScoredReports:
+    def test_filters_on_outcome_not_null(self):
+        store = RecordingStore(response=[[]])
+        store.get_scored_reports()
+        params = store.calls[0]["params"]
+        assert params["outcome"] == "not.is.null"
+
+    def test_decodes_stated_confidence(self):
+        store = RecordingStore(response=[[_row()]])
+        scored = store.get_scored_reports()
+        assert scored[0].stated_confidence == 0.8
+        assert scored[0].report.confidence_score == 0.9
+
+
+class TestToStoredStatedConfidenceFallback:
+    def test_falls_back_to_confidence_score_when_column_is_absent(self):
+        # A deployment that hasn't run the stated_confidence_score migration
+        # yet must not 500 on every read — PostgREST simply omits the key.
+        store = RecordingStore(response=[[]])
+        row = _row()
+        del row["stated_confidence_score"]
+        stored = store._to_stored(row)
+        assert stored.stated_confidence == row["confidence_score"]
+
+    def test_falls_back_when_column_is_null(self):
+        store = RecordingStore(response=[[]])
+        stored = store._to_stored(_row(stated_confidence_score=None))
+        assert stored.stated_confidence == 0.9
 
 
 class TestRecordEvaluation:

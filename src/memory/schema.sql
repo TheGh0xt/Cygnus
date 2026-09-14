@@ -7,6 +7,14 @@ CREATE TABLE IF NOT EXISTS analysis_reports (
     market_slug TEXT NOT NULL,
     report_json TEXT NOT NULL,          -- full MarketAnalysisReport JSON
     confidence_score REAL NOT NULL,     -- denormalized, updated by evaluation
+    -- Written once at save_report and never touched again — the analyst's
+    -- original claim, before any T+48h adjustment. confidence_score above
+    -- is deliberately mutable (the self-correction loop's "current best
+    -- estimate"); calibration (B.11) needs the pre-adjustment value, or
+    -- binning a scored report by its own post-hoc-adjusted confidence would
+    -- measure how much the score moved, not how well-calibrated the
+    -- original claim was.
+    stated_confidence_score REAL,
     -- Nullable: if the price fetch fails at report time we still persist the
     -- report rather than losing it. The evaluation worker skips rows with a
     -- null price, which is recoverable; a dropped report never is.

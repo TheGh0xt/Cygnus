@@ -1525,9 +1525,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "501": {
-            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
           }
         },
         "summary": "Reliability of PMIE's own confidence scores"

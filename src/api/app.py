@@ -12,6 +12,7 @@ from ..generation.discovery import SagittariusDiscovery
 from ..memory import build_memory_store
 from .accounts import Accounts
 from .auth import JwksCache
+from .calibration_routes import router as calibration_router
 from .contract_stubs import router as contract_stub_router
 from .discovery_routes import router as discovery_router
 from .errors import PmieError, problem_response
@@ -147,6 +148,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     app.include_router(growth_authenticated_router)
     app.include_router(discovery_router)
     app.include_router(mfa_router)
+    app.include_router(calibration_router)
     # Frozen contract: shapes agreed, logic pending. Each route 501s and
     # names the ROADMAP task that will land it. See contract_stubs.py.
     app.include_router(contract_stub_router)

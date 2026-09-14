@@ -80,6 +80,74 @@ def test_record_evaluation_updates_and_removes_from_due(store):
     assert stored.report.confidence_score == 0.9
 
 
+def test_stated_confidence_survives_evaluations_adjustment(store):
+    """B.11: calibration bins by what the analyst originally claimed, not the
+    post-evaluation adjusted value — otherwise a correct call's own bin gets
+    nudged toward "correct" by the adjustment that scored it, which is
+    circular. record_evaluation (T+48h, via record_checkpoint in production)
+    rewrites confidence_score; stated_confidence must not move."""
+    report_id = store.save_report(
+        make_report(confidence=0.85), "slug", 0.58, created_at=NOW
+    )
+    later = NOW + timedelta(hours=49)
+
+    store.record_evaluation(
+        report_id, new_confidence=0.9, outcome="CONFIRMED", evaluated_at=later
+    )
+
+    stored = store.get_history_for_market("0xabc")[0]
+    assert stored.stated_confidence == 0.85
+    assert (
+        stored.report.confidence_score == 0.9
+    )  # the adjusted value, unchanged behaviour
+
+
+def test_stated_confidence_defaults_to_confidence_score_when_never_evaluated(store):
+    report_id = store.save_report(
+        make_report(confidence=0.7), "slug", 0.58, created_at=NOW
+    )
+    stored = store.get_history_for_market("0xabc")[0]
+    assert report_id > 0
+    assert stored.stated_confidence == 0.7
+
+
+class TestGetScoredReports:
+    """B.11: the calibration endpoint bins reports that have a canonical
+    (48h) outcome — get_scored_reports is that read."""
+
+    def test_unevaluated_reports_are_excluded(self, store):
+        store.save_report(make_report(), "slug", 0.58, created_at=NOW)
+        assert store.get_scored_reports() == []
+
+    def test_evaluated_reports_are_included(self, store):
+        report_id = store.save_report(
+            make_report(confidence=0.8), "slug", 0.58, created_at=NOW
+        )
+        store.record_evaluation(
+            report_id,
+            new_confidence=0.85,
+            outcome="CONFIRMED",
+            evaluated_at=NOW + timedelta(hours=49),
+        )
+        scored = store.get_scored_reports()
+        assert len(scored) == 1
+        assert scored[0].outcome == "CONFIRMED"
+        assert scored[0].stated_confidence == 0.8
+
+    def test_mixture_returns_only_the_evaluated_ones(self, store):
+        evaluated_id = store.save_report(make_report("0xaaa"), "a", 0.5, created_at=NOW)
+        store.save_report(make_report("0xbbb"), "b", 0.5, created_at=NOW)
+        store.record_evaluation(
+            evaluated_id,
+            new_confidence=0.5,
+            outcome="REVERSED",
+            evaluated_at=NOW + timedelta(hours=49),
+        )
+        scored = store.get_scored_reports()
+        assert len(scored) == 1
+        assert scored[0].report.market_id == "0xaaa"
+
+
 def test_history_is_per_market_and_oldest_first(store):
     store.save_report(make_report("0xaaa"), "a", 0.5, created_at=NOW)
     store.save_report(

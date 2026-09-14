@@ -106,6 +106,8 @@ class PostgresMemoryStore:
                 # that every reader then has to parse twice.
                 "report_json": report.model_dump(mode="json"),
                 "confidence_score": report.confidence_score,
+                # Fixed here, never touched again — see StoredReport.stated_confidence.
+                "stated_confidence_score": report.confidence_score,
                 "price_at_report": price_at_report,
                 "created_at": created.isoformat(),
             },
@@ -302,8 +304,25 @@ class PostgresMemoryStore:
         ).json()
         return [self._to_stored(row) for row in rows]
 
+    def get_scored_reports(self) -> list[StoredReport]:
+        """Every report with a canonical (48h) outcome recorded.
+
+        The read behind B.11's calibration curve: only a report that has
+        actually been scored against what the market did 48 hours later
+        belongs in a reliability calculation.
+        """
+        rows = self._request(
+            "GET",
+            _TABLE,
+            params={"outcome": "not.is.null", "select": "*"},
+        ).json()
+        return [self._to_stored(row) for row in rows]
+
     @staticmethod
     def _to_stored(row: dict) -> StoredReport:
+        # .get(), not row[...]: a deployment that hasn't yet run the
+        # stated_confidence_score migration must not 500 on every read.
+        stated = row.get("stated_confidence_score")
         return StoredReport(
             id=row["id"],
             market_id=row["market_id"],
@@ -316,6 +335,7 @@ class PostgresMemoryStore:
             if row["evaluated_at"]
             else None,
             outcome=row["outcome"],
+            stated_confidence=stated if stated is not None else row["confidence_score"],
         )
 
 
