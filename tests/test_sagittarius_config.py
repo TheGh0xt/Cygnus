@@ -129,10 +129,22 @@ class TestMcpHttpClient:
         # gets httpx's 5s default and no redirects. Sagittarius takes ~50s to
         # wake on the free plan, so every call would time out once
         # MCP_BEARER_TOKEN is set in production.
-        async with mcp_http_client({"Authorization": "Bearer secret-token"}) as client:
-            assert client.timeout.connect == 30.0
-            assert client.timeout.read == 300.0
-            assert client.follow_redirects is True
+        #
+        # Compared against a fresh create_mcp_http_client() rather than
+        # hardcoded numbers: the whole point of building on that function is
+        # that our client tracks whatever the mcp SDK's own default is, on
+        # whatever SDK version is actually installed. Pinning literal values
+        # here would just reintroduce the same kind of drift this guards
+        # against, one version bump away.
+        from mcp.shared._httpx_utils import create_mcp_http_client
+
+        async with create_mcp_http_client() as reference:
+            async with mcp_http_client(
+                {"Authorization": "Bearer secret-token"}
+            ) as client:
+                assert client.timeout == reference.timeout
+                assert client.follow_redirects == reference.follow_redirects
+                assert reference.timeout.connect != 5.0  # sanity: not httpx's default
 
     async def test_closes_the_client_it_created(self):
         # streamable_http_client only closes a client it built itself; one
