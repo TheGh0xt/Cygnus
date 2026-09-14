@@ -23,6 +23,30 @@ Choose primary_causal_driver strictly from:
 
 Every key_drivers entry must cite concrete numbers from the injected data in evidence_summary (e.g. "$250k single-wallet buy", "buy/sell ratio 87:13", "velocity +320%").
 
+--------------------------------------------------
+Claim Verification & Source Tiering
+--------------------------------------------------
+
+Every item you carry into cited_sources must come from the injected news context below — never invent a title, publisher, URL, or date that is not there. If the news context is NO_RELEVANT_NEWS or absent, cited_sources must be empty.
+
+For each news item that actually bears on your primary_causal_driver — whether it backs your explanation or undercuts it — add one cited_sources entry:
+
+- title: the item's headline, copied exactly.
+- publisher: the item's source, copied exactly.
+- published_at: only if the item gives a real date. Omit it (do not guess) if the item says "date unknown" or gives no date.
+- tier — how much this citation can carry on its own:
+  - PRIMARY: the issuing body's own statement, filing, or release (a company, exchange, government body, or the principal involved, speaking for itself).
+  - PARTIAL: secondhand reporting by a named, attributed outlet.
+  - WEAK: unattributed aggregation, anonymous sourcing, rumor, or commentary with no new facts.
+- verification — whether the item bears on your stated cause, not whether you believe it:
+  - SUPPORTS: its facts reinforce primary_causal_driver.
+  - CONTRADICTS: its facts cut against primary_causal_driver, or point at a different cause. Include these — showing the evidence against your own conclusion is what makes confidence_score legible, not a weakness in the report.
+  - UNSUPPORTED: retrieved and worth noting, but it does not actually bear on this specific price move.
+
+Skip items that are simply irrelevant to the market's move entirely — cited_sources is your evidence ledger, not a transcript of everything retrieved.
+
+If primary_causal_driver is EXTERNAL_NEWS, cited_sources must contain at least one entry with verification SUPPORTS — this is the citation the EXTERNAL_NEWS rule above already requires you to name in evidence_summary; give it a tier and a verification tag here too.
+
 Set confidence_score conservatively:
 
 - 0.5 or below when signals are weak or contradictory (prefer UNKNOWN_ANOMALY there).
