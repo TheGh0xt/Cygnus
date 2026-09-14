@@ -103,6 +103,34 @@ def test_new_route_defaults_to_401_unless_explicitly_allowlisted(client):
     assert reached["value"] is False, "the handler ran despite no credentials"
 
 
+def _all_api_routes(routes):
+    """Flatten nested routers into their `APIRoute` leaves.
+
+    FastAPI >=0.138 stores each `include_router` call as an opaque
+    `_IncludedRouter` wrapper in `app.routes` instead of flattening its
+    children eagerly, so a bare `isinstance(route, APIRoute)` filter over
+    `app.routes` silently matches nothing — every route in the app, guarded
+    or not. Verified by hand while adding B.15's waitlist route: removing its
+    entry from `PUBLIC_ROUTES` left `test_every_public_route_is_closed_unless_allowlisted`
+    green, because it was walking zero routes rather than finding one
+    unguarded.
+    """
+    from fastapi.routing import APIRoute
+
+    try:
+        from fastapi.routing import _IncludedRouter
+    except ImportError:  # older FastAPI already flattens eagerly
+        _IncludedRouter = ()
+
+    out = []
+    for route in routes:
+        if isinstance(route, APIRoute):
+            out.append(route)
+        elif _IncludedRouter and isinstance(route, _IncludedRouter):
+            out.extend(_all_api_routes(route.original_router.routes))
+    return out
+
+
 def _requires_identity(route) -> bool:
     """Whether get_current_user runs for this route, however it was attached.
 
@@ -136,14 +164,29 @@ def test_every_public_route_is_closed_unless_allowlisted(tmp_path):
     Internal cron routes are excluded: they are hidden from the schema and
     authenticated by a shared secret header instead of a user token.
     """
-    from fastapi.routing import APIRoute
-
     app = create_app(db_path=str(tmp_path / "gate.db"))
+    all_routes = _all_api_routes(app.routes)
+
+    # _all_api_routes depends on FastAPI's private _IncludedRouter, which is
+    # exactly the kind of internal that silently renamed once already (see
+    # this test's history) and left the walk below matching nothing while
+    # staying green. requirements.txt pins fastapi>=0.115 unpinned at the top
+    # end, so a future upgrade can do it again. If the walk ever comes back
+    # empty or missing a route every build has, that is this test lying about
+    # having checked anything — fail loudly instead of vacuously passing.
+    seen_paths = {route.path for route in all_routes}
+    assert len(all_routes) >= 15, (
+        f"only found {len(all_routes)} routes — _all_api_routes is probably "
+        "walking the wrong thing again (FastAPI route internals changed?), "
+        "which would make every assertion below pass vacuously"
+    )
+    assert {"/v1/analyses", "/v1/waitlist", "/v1/me"} <= seen_paths, (
+        "known routes are missing from the walk — _all_api_routes is not "
+        f"finding real app routes; found paths: {sorted(seen_paths)}"
+    )
 
     unguarded = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    for route in all_routes:
         if route.path.startswith("/v1/internal/"):
             continue
         for method in route.methods - {"HEAD", "OPTIONS"}:

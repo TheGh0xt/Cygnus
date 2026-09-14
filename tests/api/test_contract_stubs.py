@@ -32,7 +32,6 @@ FROZEN: list[tuple[str, str, dict | None, str]] = [
         "B.10",
     ),
     ("post", "/v1/events", {"name": "ui_mode_switched", "ui_mode": "TERMINAL"}, "B.19"),
-    ("post", "/v1/waitlist", {"email": "someone@example.invalid"}, "B.15"),
     ("get", "/v1/calibration", None, "B.11"),
     ("get", "/v1/markets/moving", None, "B.17"),
 ]

@@ -1895,14 +1895,23 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ProblemResponse"
                 }
-              }
+              },
+              "application/problem+json": {}
             },
-            "description": "Validation Error"
+            "description": "Malformed email address"
           },
-          "501": {
-            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "The waitlist store is unavailable"
           }
         },
         "summary": "Join the beta waitlist (public)"
