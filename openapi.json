@@ -552,6 +552,17 @@
             "title": "Onboarding Completed",
             "type": "boolean"
           },
+          "ui_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UiMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null means never chosen, distinct from choosing the default."
+          },
           "usage": {
             "$ref": "#/components/schemas/UsageSummary"
           }
