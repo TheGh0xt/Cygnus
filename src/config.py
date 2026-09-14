@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 import httpx
 from google.adk.tools.mcp_tool.mcp_session_manager import (
     StreamableHTTPConnectionParams,
 )
+from mcp.shared._httpx_utils import create_mcp_http_client
 
 logger = logging.getLogger("cygnus.config")
 
@@ -81,9 +83,10 @@ def sagittarius_connection_params() -> StreamableHTTPConnectionParams:
     )
 
 
-def mcp_http_client(headers: dict[str, str] | None = None) -> httpx.AsyncClient | None:
+@asynccontextmanager
+async def mcp_http_client(headers: dict[str, str] | None = None):
     """The httpx.AsyncClient to hand a raw `streamable_http_client(..., http_client=...)`
-    call, or None.
+    call, or None — as an async context manager, entered with `async with`.
 
     ADK's own StreamableHTTPConnectionParams takes `headers` directly (see
     sagittarius_connection_params above); the plain `mcp` SDK function used by
@@ -94,12 +97,34 @@ def mcp_http_client(headers: dict[str, str] | None = None) -> httpx.AsyncClient 
     gets forgotten on one Sagittarius call site while every other one
     enforces it.
 
-    None (not an empty-headers client) when there's nothing to add: the mcp
-    SDK then builds its own default client, matching behaviour from before
-    B.3 exactly.
+    Two things this has to get right that a bare httpx.AsyncClient(headers=...)
+    doesn't:
+
+    - Timeouts. streamable_http_client's own default client is built via
+      create_mcp_http_client(), which sets a 30s connect and a 300s read
+      timeout plus follow_redirects=True. httpx's own default is a flat 5s
+      and no redirects — fine for nothing here, and fatal against a
+      Sagittarius that takes ~50s to wake from a free-plan sleep. Built with
+      the same create_mcp_http_client() the SDK uses for its own default, so
+      the two stay in lockstep as the SDK's defaults evolve.
+    - Lifecycle. streamable_http_client only closes a client it created
+      itself ("Only manage client lifecycle if we created it" — a client
+      passed in via http_client= is the caller's to close. A plain function
+      returning an AsyncClient meant every call leaked a connection pool);
+      this is why it's a context manager rather than a function, so the
+      caller's `async with mcp_http_client(...) as http_client:` guarantees
+      it's closed on the way out.
+
+    Yields None (not an empty-headers client) when there's nothing to add:
+    the mcp SDK then builds and manages its own default client, matching
+    behaviour from before B.3 exactly.
     """
     resolved = headers if headers is not None else mcp_auth_headers()
-    return httpx.AsyncClient(headers=resolved) if resolved else None
+    if not resolved:
+        yield None
+        return
+    async with create_mcp_http_client(headers=resolved) as client:
+        yield client
 
 
 def warm_sagittarius(timeout: float = 60.0) -> bool:

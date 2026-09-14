@@ -142,9 +142,9 @@ class SagittariusDiscovery:
         if categories:
             args["categories"] = categories
 
-        http_client = mcp_http_client(self._headers)
         try:
             async with (
+                mcp_http_client(self._headers) as http_client,
                 streamable_http_client(self.mcp_url, http_client=http_client) as (
                     read,
                     write,

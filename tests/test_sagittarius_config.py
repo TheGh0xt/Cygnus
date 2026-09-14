@@ -95,26 +95,61 @@ class TestMcpHttpClient:
     """The httpx.AsyncClient builder shared by Cygnus's raw `mcp` SDK clients
     — the evaluation worker and generation discovery — which take
     http_client rather than headers directly. sagittarius_connection_params
-    (ADK's own toolsets) is covered separately above."""
+    (ADK's own toolsets) is covered separately above.
 
-    def test_no_client_when_headers_empty(self):
+    An async context manager, not a plain function: streamable_http_client
+    only manages the lifecycle of a client it creates itself — a client we
+    hand it is ours to close, and the caller does that by entering this as
+    `async with`. Everything below exercises it that way.
+    """
+
+    async def test_no_client_when_headers_empty(self):
         # The mcp SDK builds its own default client in this case, matching
         # behaviour from before B.3 exactly.
-        assert mcp_http_client({}) is None
+        async with mcp_http_client({}) as client:
+            assert client is None
 
-    def test_client_carries_the_bearer_header(self):
-        client = mcp_http_client({"Authorization": "Bearer secret-token"})
-        assert client is not None
-        assert client.headers["authorization"] == "Bearer secret-token"
+    async def test_client_carries_the_bearer_header(self):
+        async with mcp_http_client({"Authorization": "Bearer secret-token"}) as client:
+            assert client is not None
+            assert client.headers["authorization"] == "Bearer secret-token"
 
-    def test_defaults_to_reading_mcp_bearer_token(self, monkeypatch):
+    async def test_defaults_to_reading_mcp_bearer_token(self, monkeypatch):
         monkeypatch.setenv("MCP_BEARER_TOKEN", "secret-token")
-        client = mcp_http_client()
-        assert client is not None
-        assert client.headers["authorization"] == "Bearer secret-token"
+        async with mcp_http_client() as client:
+            assert client is not None
+            assert client.headers["authorization"] == "Bearer secret-token"
 
-    def test_defaults_to_none_when_unset(self):
-        assert mcp_http_client() is None
+    async def test_defaults_to_none_when_unset(self):
+        async with mcp_http_client() as client:
+            assert client is None
+
+    async def test_uses_mcp_timeouts_not_httpxs_5s_default(self):
+        # The actual bug this guards: a bare httpx.AsyncClient(headers=...)
+        # gets httpx's 5s default and no redirects. Sagittarius takes ~50s to
+        # wake on the free plan, so every call would time out once
+        # MCP_BEARER_TOKEN is set in production.
+        async with mcp_http_client({"Authorization": "Bearer secret-token"}) as client:
+            assert client.timeout.connect == 30.0
+            assert client.timeout.read == 300.0
+            assert client.follow_redirects is True
+
+    async def test_closes_the_client_it_created(self):
+        # streamable_http_client only closes a client it built itself; one
+        # handed in via http_client= is ours to close, or it leaks a
+        # connection pool on every call. httpx.AsyncClient.__aexit__ closes
+        # the transport directly rather than calling .aclose() (confirmed by
+        # reading its source), so is_closed is the true signal here — a
+        # mocked .aclose() would pass even with the leak still present.
+        async with mcp_http_client({"Authorization": "Bearer secret-token"}) as client:
+            assert client.is_closed is False
+        assert client.is_closed is True
+
+    async def test_no_client_to_close_when_headers_empty(self):
+        # Nothing was created, so nothing should be closed — and entering an
+        # empty async-with body must not raise.
+        async with mcp_http_client({}) as client:
+            assert client is None
 
 
 class TestWarmUp:
