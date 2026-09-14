@@ -20,7 +20,7 @@ from .generation_routes import router as generation_router
 from .growth import Growth
 from .growth_routes import router as growth_router
 from .logging import configure_logging, new_request_id, request_id_var
-from .mfa import FactorLookup, SupabaseMfa
+from .mfa import SupabaseMfa, build_factor_lookup
 from .mfa_routes import router as mfa_router
 from .persistence import ReportPersistence
 from .pipeline import AnalysisPipeline, build_runner
@@ -89,7 +89,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     app.state.accounts = accounts
     app.state.growth = Growth()
     app.state.mfa = SupabaseMfa()
-    app.state.mfa_factor_lookup = FactorLookup()
+    app.state.mfa_factor_lookup = build_factor_lookup()
     app.state.jwks = JwksCache()
     app.state.sharing = ShareTokens()
 

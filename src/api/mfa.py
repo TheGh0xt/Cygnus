@@ -247,6 +247,31 @@ class FactorLookup:
         self._cache.pop(user_id, None)
 
 
+def build_factor_lookup() -> FactorLookup:
+    """Construct the auth gate's factor lookup, refusing an unsafe production state.
+
+    access.py treats an *unconfigured* lookup as a no-op — enforcement simply
+    doesn't run, the same posture Accounts/Growth take toward their own
+    missing configuration. That is the right default for local dev and CI,
+    which typically have no Supabase project to check at all, but it is
+    exactly the wrong default in production: a missing service key there
+    would silently turn MFA enforcement off for every user while the account
+    settings screen still says it's on. That is the same silent-failure
+    shape B.13 was built against for the memory store, so it gets the same
+    fix — fail at startup, not per request.
+    """
+    from .config import is_production
+
+    lookup = FactorLookup()
+    if is_production() and not lookup.configured:
+        raise MfaError(
+            "PMIE_ENVIRONMENT=production requires MFA factor lookup to be "
+            "configured (SUPABASE_URL + a secret key); refusing to boot with "
+            "MFA enforcement silently disabled for every user."
+        )
+    return lookup
+
+
 __all__ = [
     "EnrollResult",
     "FactorLookup",
@@ -254,4 +279,5 @@ __all__ = [
     "InvalidCode",
     "MfaError",
     "SupabaseMfa",
+    "build_factor_lookup",
 ]

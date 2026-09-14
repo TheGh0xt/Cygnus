@@ -7,6 +7,7 @@ from src.api.mfa import (
     InvalidCode,
     MfaError,
     SupabaseMfa,
+    build_factor_lookup,
 )
 
 
@@ -250,3 +251,42 @@ class TestFactorLookup:
         assert lookup.has_verified_totp_factor("user-1") is True
         assert lookup.has_verified_totp_factor("user-2") is False
         assert lookup.fetch_calls == ["user-1", "user-2"]
+
+
+class TestBuildFactorLookup:
+    """B.7 review: an unconfigured lookup must not be a silent no-op in
+
+    production — the same failure shape B.13 was built against for the
+    memory store (see src/memory/__init__.py's build_memory_store).
+    """
+
+    def test_unconfigured_in_production_raises(self, monkeypatch):
+        monkeypatch.setenv("PMIE_ENVIRONMENT", "production")
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
+
+        with pytest.raises(MfaError, match="production"):
+            build_factor_lookup()
+
+    def test_configured_in_production_succeeds(self, monkeypatch):
+        monkeypatch.setenv("PMIE_ENVIRONMENT", "production")
+        monkeypatch.setenv("SUPABASE_URL", "https://example.test")
+        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+
+        lookup = build_factor_lookup()
+
+        assert lookup.configured is True
+
+    def test_unconfigured_outside_production_is_a_no_op(self, monkeypatch):
+        # Sanity check: the production gate must not change behaviour
+        # anywhere else — most local/dev/CI environments have no Supabase
+        # project to check MFA against at all.
+        monkeypatch.delenv("PMIE_ENVIRONMENT", raising=False)
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
+
+        lookup = build_factor_lookup()
+
+        assert lookup.configured is False
