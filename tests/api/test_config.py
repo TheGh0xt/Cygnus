@@ -11,6 +11,8 @@ import pytest
 from src.api.accounts import Accounts
 from src.api.config import (
     describe_supabase_config,
+    is_production,
+    pmie_environment,
     supabase_secret_key,
     supabase_url,
 )
@@ -79,6 +81,32 @@ class TestConsumersHonourBothNames:
         assert isinstance(
             build_memory_store(str(tmp_path / "unused.db")), PostgresMemoryStore
         )
+
+
+class TestEnvironmentSignal:
+    """PMIE_ENVIRONMENT is the explicit, deploy-set signal for 'production'.
+
+    Not inferred from platform vars like RENDER, and not the absence of a
+    flag: an explicit value someone chose to set, matching every other
+    PMIE_* setting in .env.example.
+    """
+
+    def test_unset_is_not_production(self, monkeypatch):
+        monkeypatch.delenv("PMIE_ENVIRONMENT", raising=False)
+        assert pmie_environment() == "development"
+        assert is_production() is False
+
+    def test_production_value(self, monkeypatch):
+        monkeypatch.setenv("PMIE_ENVIRONMENT", "production")
+        assert is_production() is True
+
+    def test_case_insensitive(self, monkeypatch):
+        monkeypatch.setenv("PMIE_ENVIRONMENT", "Production")
+        assert is_production() is True
+
+    def test_other_values_are_not_production(self, monkeypatch):
+        monkeypatch.setenv("PMIE_ENVIRONMENT", "staging")
+        assert is_production() is False
 
 
 class TestDiagnostics:

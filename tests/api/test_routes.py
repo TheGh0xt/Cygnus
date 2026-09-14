@@ -29,6 +29,18 @@ def test_health_and_ready(tmp_path):
     assert client.get("/v1/ready").status_code == 200
 
 
+def test_ready_surfaces_the_active_memory_backend(tmp_path, monkeypatch):
+    # B.13: which store is actually live must be visible, not just whether
+    # the process is up.
+    monkeypatch.delenv("PMIE_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
+    client = TestClient(create_app(db_path=str(tmp_path / "t.db")))
+    body = client.get("/v1/ready").json()
+    assert body["checks"]["memory_backend"] == "sqlite"
+
+
 def test_unknown_analysis_returns_problem_json(tmp_path):
     client = TestClient(create_app(db_path=str(tmp_path / "t.db")))
     response = client.get("/v1/analyses/does-not-exist")

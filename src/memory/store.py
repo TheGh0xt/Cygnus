@@ -70,6 +70,8 @@ class Checkpoint:
 
 
 class SqliteMemoryStore:
+    backend = "sqlite"
+
     def __init__(self, db_path: str | Path):
         # check_same_thread=False because the API opens this store once at
         # startup and then uses it from request handlers, which run on

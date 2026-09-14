@@ -67,6 +67,9 @@ class ReadyChecks(BaseModel):
     # which is the normal local-development case.
     report_store_writable: str
     detail: str | None = None
+    # "postgres" | "sqlite" — which memory store this process actually
+    # selected (B.13), not merely whether it looks configured.
+    memory_backend: str
 
 
 class ReadyResponse(BaseModel):

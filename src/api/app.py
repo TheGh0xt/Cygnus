@@ -75,6 +75,9 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     # Held on app state so the scheduled evaluation endpoint can reuse the
     # same store and price fetcher rather than constructing its own.
     app.state.memory_store = store
+    # Which store actually got selected (B.13) — surfaced on /v1/ready so a
+    # deploy is visibly running on postgres rather than assumed to be.
+    app.state.memory_backend = store.backend
     app.state.price_fetcher = fetcher
     # Market discovery, shared by the scheduled generation cycle and (later)
     # the personalised feed. Both ask Sagittarius the same question.

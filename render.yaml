@@ -3,25 +3,14 @@
 # Connect this repo in Render's dashboard and it reads this file.
 #
 # ---------------------------------------------------------------------------
-# KNOWN LIMITATION ON THE FREE PLAN: the filesystem is ephemeral.
+# MEMORY STORE: Postgres (Supabase) in production, enforced.
 #
-# Cygnus writes its memory store to SQLite on local disk. Render's persistent
-# disks are a paid feature, so on a free instance every restart, redeploy and
-# wake-from-sleep starts with an empty database.
-#
-# That matters more than it sounds. The memory store holds every completed
-# report together with the price observed at the time, and that price cannot
-# be reconstructed later — it is the input the evaluation worker scores 48
-# hours on. Losing it means no accuracy record, which is the product's whole
-# claim to being worth anything.
-#
-# So this configuration is fine for demonstrating the API and exercising the
-# UI, and NOT fine for collecting the data the accuracy record depends on.
-#
-# The fix is to move the memory store to the Supabase Postgres this project
-# already uses for accounts. The store exposes five methods across three call
-# sites, so it is a contained change, and it is the direction Phase 4 needs
-# anyway for pgvector-backed semantic search.
+# PMIE_ENVIRONMENT=production below (B.13) makes build_memory_store() refuse
+# the SQLite fallback outright: a missing or unreachable Postgres store fails
+# startup instead of silently writing to this container's ephemeral disk. The
+# memory store holds every completed report with the price observed at the
+# time, which cannot be reconstructed later — it is what the evaluation
+# worker scores 48 hours on, so losing it means no accuracy record.
 # ---------------------------------------------------------------------------
 
 services:
@@ -35,6 +24,12 @@ services:
     envVars:
       - key: PORT
         value: 8000
+
+      # B.13: the explicit production signal. Not a secret — the deploy
+      # config itself declares this service production, so PMIE_ENVIRONMENT
+      # can't be left unset by omission the way a dashboard-only value could.
+      - key: PMIE_ENVIRONMENT
+        value: production
 
       # Where Sagittarius is reachable. Point this at the deployed Layer 1
       # service, not localhost.

@@ -816,13 +816,18 @@
             ],
             "title": "Detail"
           },
+          "memory_backend": {
+            "title": "Memory Backend",
+            "type": "string"
+          },
           "report_store_writable": {
             "title": "Report Store Writable",
             "type": "string"
           }
         },
         "required": [
-          "report_store_writable"
+          "report_store_writable",
+          "memory_backend"
         ],
         "title": "ReadyChecks",
         "type": "object"
