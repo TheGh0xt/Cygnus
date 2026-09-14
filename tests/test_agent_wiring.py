@@ -15,17 +15,29 @@ def test_orchestrator_has_event_and_formatter_specialists():
 
 
 def test_root_agent_is_exposed_for_adk_discovery():
+    """ADK discovers the agent by importing '<repo dir name>.agent' from the
+    repo's parent directory — exactly what `adk run <dirname>` does.
+
+    The repo directory isn't always named "Cygnus": a git worktree checks
+    this same repo out under its own directory name (e.g.
+    Cygnus/.claude/worktrees/reasoning), so the package name is derived from
+    the actual directory rather than hardcoded.
+    """
     import importlib
     import pathlib
     import sys
 
-    parent = str(pathlib.Path(__file__).resolve().parents[2])
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    parent = str(repo_root.parent)
+    package_name = repo_root.name
     sys.path.insert(0, parent)
     try:
-        pkg = importlib.import_module("Cygnus.agent")
+        pkg = importlib.import_module(f"{package_name}.agent")
         assert pkg.root_agent.name == "polymarket_orchestrator"
     finally:
         sys.path.remove(parent)
+        sys.modules.pop(package_name, None)
+        sys.modules.pop(f"{package_name}.agent", None)
 
 
 def test_signal_agent_registered():
