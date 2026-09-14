@@ -51,6 +51,44 @@ def build_runner(db_path: str):
 
 
 REPORT_KEY = "market_analysis_report"
+NEWS_KEY = "news_context_output"
+
+
+def _citation_coverage_violations(report: dict, news_context: str | None) -> list[str]:
+    """Rules the analyst's cited_sources output should satisfy, checked
+    deterministically after the fact.
+
+    B.12's prompt instructs the analyst to populate cited_sources with a
+    provenance tier and a verification tag for every citation that bears on
+    its stated cause. That is a prompt instruction, not something
+    output_schema can enforce — a model that ignores it still produces a
+    schema-valid report with cited_sources == [], and nothing would ever
+    notice. This closes that gap the same way every other silent-failure
+    precedent in this codebase gets closed: log it loudly, don't hide it
+    behind a passing run.
+
+    Returns the broken rules' descriptions, or [] if none. Never raises, and
+    the caller never fails the analysis over it — a citation coverage gap is
+    a quality signal to watch in production, not a broken run to reject.
+    """
+    violations: list[str] = []
+    cited_sources = report.get("cited_sources") or []
+
+    has_real_news = bool(news_context) and news_context.strip() != "NO_RELEVANT_NEWS"
+    if has_real_news and not cited_sources:
+        violations.append(
+            "news_context_output had real items but cited_sources is empty"
+        )
+
+    if report.get("primary_causal_driver") == "EXTERNAL_NEWS" and not any(
+        source.get("verification") == "SUPPORTS" for source in cited_sources
+    ):
+        violations.append(
+            "primary_causal_driver is EXTERNAL_NEWS but no cited_sources "
+            "entry has verification SUPPORTS"
+        )
+
+    return violations
 
 
 def _state_delta(event) -> dict:
@@ -131,6 +169,11 @@ class AnalysisPipeline:
                 final = await self._report_from_session(session.id)
             if final is None:
                 raise RuntimeError("pipeline produced no report")
+
+            for violation in _citation_coverage_violations(final, state.get(NEWS_KEY)):
+                logger.warning(
+                    "analysis %s citation coverage: %s", analysis_id, violation
+                )
 
             self._registry.mark_completed(analysis_id, final)
             outcome = "completed"
