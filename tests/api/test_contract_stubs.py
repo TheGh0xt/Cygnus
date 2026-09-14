@@ -21,9 +21,6 @@ from src.api.app import create_app
 # here is how a stub graduates — and doing so without implementing the route
 # makes test_no_stub_is_silently_dropped fail.
 FROZEN: list[tuple[str, str, dict | None, str]] = [
-    ("post", "/v1/me/mfa/enroll", None, "B.7"),
-    ("post", "/v1/me/mfa/verify", {"factor_id": "f", "code": "123456"}, "B.7"),
-    ("get", "/v1/me/mfa", None, "B.7"),
     ("get", "/v1/me/referrals", None, "B.10"),
     (
         "post",

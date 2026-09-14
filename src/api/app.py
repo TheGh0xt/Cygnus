@@ -20,6 +20,8 @@ from .generation_routes import router as generation_router
 from .growth import Growth
 from .growth_routes import router as growth_router
 from .logging import configure_logging, new_request_id, request_id_var
+from .mfa import SupabaseMfa
+from .mfa_routes import router as mfa_router
 from .persistence import ReportPersistence
 from .pipeline import AnalysisPipeline, build_runner
 from .ratelimit import RateLimiter
@@ -86,6 +88,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     accounts = Accounts()
     app.state.accounts = accounts
     app.state.growth = Growth()
+    app.state.mfa = SupabaseMfa()
     app.state.jwks = JwksCache()
     app.state.sharing = ShareTokens()
 
@@ -140,6 +143,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     app.include_router(generation_router)
     app.include_router(growth_router)
     app.include_router(discovery_router)
+    app.include_router(mfa_router)
     # Frozen contract: shapes agreed, logic pending. Each route 501s and
     # names the ROADMAP task that will land it. See contract_stubs.py.
     app.include_router(contract_stub_router)

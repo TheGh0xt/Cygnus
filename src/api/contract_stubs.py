@@ -17,13 +17,13 @@ implement it, and delete it from here. This file should shrink to nothing. If
 it stops shrinking, the freeze has become a backlog.
 
 Owners, by ROADMAP §0b task:
-    B.7   TOTP enrolment            → auth/MFA
     B.10  referrals, quota, intent  → accounts
     B.11  explanation calibration   → evaluation
     B.19  UI-mode telemetry         → growth
 
 Already retired: B.15 (waitlist) — see growth.py / growth_routes.py.
 B.17 (moving-markets feed) — see discovery.py / discovery_routes.py.
+B.7 (TOTP) — see mfa.py / mfa_routes.py.
 """
 
 from __future__ import annotations
@@ -34,9 +34,6 @@ from .access import get_current_user
 from .errors import ErrorType, PmieError
 from .models import (
     CalibrationResponse,
-    MfaEnrollResponse,
-    MfaStatusResponse,
-    MfaVerifyRequest,
     PayIntentRequest,
     ReferralSummary,
     UserEventRequest,
@@ -65,39 +62,6 @@ def _stub(task: str) -> None:
         f"This endpoint's contract is frozen but its logic is not built yet ({task}).",
         501,
     )
-
-
-# ── B.7 — TOTP, via Supabase MFA factors ─────────────────────────────────────
-
-
-@router.post(
-    "/me/mfa/enroll",
-    response_model=MfaEnrollResponse,
-    responses=_RESPONSES,
-    summary="Begin TOTP enrolment",
-)
-async def enroll_mfa() -> MfaEnrollResponse:
-    _stub("B.7")
-
-
-@router.post(
-    "/me/mfa/verify",
-    response_model=MfaStatusResponse,
-    responses=_RESPONSES,
-    summary="Confirm a TOTP code and activate the factor",
-)
-async def verify_mfa(_body: MfaVerifyRequest) -> MfaStatusResponse:
-    _stub("B.7")
-
-
-@router.get(
-    "/me/mfa",
-    response_model=MfaStatusResponse,
-    responses=_RESPONSES,
-    summary="Whether TOTP is active for this user",
-)
-async def mfa_status() -> MfaStatusResponse:
-    _stub("B.7")
 
 
 # ── B.10 — referrals and the intent wall ─────────────────────────────────────
