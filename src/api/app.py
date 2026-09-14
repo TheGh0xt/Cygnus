@@ -13,6 +13,7 @@ from ..memory import build_memory_store
 from .accounts import Accounts
 from .auth import JwksCache
 from .contract_stubs import router as contract_stub_router
+from .discovery_routes import router as discovery_router
 from .errors import PmieError, problem_response
 from .evaluation_routes import router as evaluation_router
 from .generation_routes import router as generation_router
@@ -135,6 +136,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     app.include_router(evaluation_router)
     app.include_router(generation_router)
     app.include_router(growth_router)
+    app.include_router(discovery_router)
     # Frozen contract: shapes agreed, logic pending. Each route 501s and
     # names the ROADMAP task that will land it. See contract_stubs.py.
     app.include_router(contract_stub_router)

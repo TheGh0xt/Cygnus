@@ -20,10 +20,10 @@ Owners, by ROADMAP §0b task:
     B.7   TOTP enrolment            → auth/MFA
     B.10  referrals, quota, intent  → accounts
     B.11  explanation calibration   → evaluation
-    B.17  moving-markets feed       → discovery
     B.19  UI-mode telemetry         → growth
 
-B.15 (waitlist) has already retired — see growth.py and growth_routes.py.
+Already retired: B.15 (waitlist) — see growth.py / growth_routes.py.
+B.17 (moving-markets feed) — see discovery.py / discovery_routes.py.
 """
 
 from __future__ import annotations
@@ -37,7 +37,6 @@ from .models import (
     MfaEnrollResponse,
     MfaStatusResponse,
     MfaVerifyRequest,
-    MovingMarketsResponse,
     PayIntentRequest,
     ReferralSummary,
     UserEventRequest,
@@ -153,18 +152,3 @@ async def calibration() -> CalibrationResponse:
     # it right about 70% of the time?" It scores no prediction of a market
     # outcome, because PMIE makes none.
     _stub("B.11")
-
-
-# ── B.17 — the personalised feed ─────────────────────────────────────────────
-
-
-@router.get(
-    "/markets/moving",
-    response_model=MovingMarketsResponse,
-    responses=_RESPONSES,
-    summary="Markets moving now, in the user's categories",
-)
-async def moving_markets() -> MovingMarketsResponse:
-    # Ranked by movement, not popularity (UI_PRD 6.4). Backed by Sagittarius's
-    # get_moving_markets, which already ships.
-    _stub("B.17")

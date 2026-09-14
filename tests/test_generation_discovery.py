@@ -46,6 +46,31 @@ class TestParsing:
         assert candidates[0].market_slug == "who-will-bernie-endorse"
         assert candidates[0].category == "Politics"
         assert candidates[0].change_24h == 0.336
+        assert candidates[0].volume_24h == 1000.0
+        assert candidates[0].end_date == "2026-11-04T00:00:00Z"
+
+    def test_missing_volume_and_end_date_default_safely(self):
+        # The scheduled generation cycle never reads these two fields, so a
+        # reply shaped for it (no volume_24h/end_date) must not fail to
+        # parse — only the feed (B.17) needs them.
+        result = _tool_result(
+            {
+                "markets": [
+                    {
+                        "slug": "no-extras",
+                        "title": "fine",
+                        "category": "Crypto",
+                        "probability": 0.4,
+                        "change_24h": 0.1,
+                    }
+                ]
+            }
+        )
+
+        candidates = parse_moving_markets(result)
+
+        assert candidates[0].volume_24h == 0.0
+        assert candidates[0].end_date is None
 
     def test_empty_market_list_is_not_an_error(self):
         # A quiet period is a legitimate answer, distinct from a broken tool.

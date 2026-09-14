@@ -81,12 +81,15 @@ def _candidate_from(raw: object) -> Candidate | None:
     if not isinstance(slug, str) or not slug:
         return None
 
+    end_date = raw.get("end_date")
     return Candidate(
         market_slug=slug,
         title=raw.get("title") or slug,
         category=raw.get("category") or "",
         probability=_as_float(raw.get("probability")),
         change_24h=_as_float(raw.get("change_24h")),
+        volume_24h=_as_float(raw.get("volume_24h")),
+        end_date=end_date if isinstance(end_date, str) and end_date else None,
     )
 
 
