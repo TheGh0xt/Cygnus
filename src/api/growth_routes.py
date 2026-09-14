@@ -39,7 +39,14 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
         503: {"description": "The waitlist store is unavailable", **PROBLEM},
     },
 )
-async def join_waitlist(body: WaitlistRequest, request: Request) -> WaitlistResponse:
+# Plain `def`, not `async def`: a docstring here would leak into the public
+# OpenAPI description, so the reasoning lives here instead. Growth.join_waitlist
+# makes a blocking httpx call; FastAPI runs a sync endpoint in the threadpool,
+# while an `async def` wrapper around blocking I/O would run it inline on the
+# single event loop this process uses. One slow Supabase response would then
+# stall every other request — including every SSE analysis stream in progress
+# — and this is the one endpoint on the whole API that requires no token.
+def join_waitlist(body: WaitlistRequest, request: Request) -> WaitlistResponse:
     if not _EMAIL_RE.match(body.email):
         raise PmieError(
             ErrorType.INVALID_REQUEST, "Enter a valid email address.", status=422

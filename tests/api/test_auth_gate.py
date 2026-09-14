@@ -165,9 +165,28 @@ def test_every_public_route_is_closed_unless_allowlisted(tmp_path):
     authenticated by a shared secret header instead of a user token.
     """
     app = create_app(db_path=str(tmp_path / "gate.db"))
+    all_routes = _all_api_routes(app.routes)
+
+    # _all_api_routes depends on FastAPI's private _IncludedRouter, which is
+    # exactly the kind of internal that silently renamed once already (see
+    # this test's history) and left the walk below matching nothing while
+    # staying green. requirements.txt pins fastapi>=0.115 unpinned at the top
+    # end, so a future upgrade can do it again. If the walk ever comes back
+    # empty or missing a route every build has, that is this test lying about
+    # having checked anything — fail loudly instead of vacuously passing.
+    seen_paths = {route.path for route in all_routes}
+    assert len(all_routes) >= 15, (
+        f"only found {len(all_routes)} routes — _all_api_routes is probably "
+        "walking the wrong thing again (FastAPI route internals changed?), "
+        "which would make every assertion below pass vacuously"
+    )
+    assert {"/v1/analyses", "/v1/waitlist", "/v1/me"} <= seen_paths, (
+        "known routes are missing from the walk — _all_api_routes is not "
+        f"finding real app routes; found paths: {sorted(seen_paths)}"
+    )
 
     unguarded = []
-    for route in _all_api_routes(app.routes):
+    for route in all_routes:
         if route.path.startswith("/v1/internal/"):
             continue
         for method in route.methods - {"HEAD", "OPTIONS"}:
