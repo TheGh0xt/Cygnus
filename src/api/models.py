@@ -55,6 +55,10 @@ class MeResponse(BaseModel):
     onboarding_completed: bool
     interests: list[str]
     usage: UsageSummary
+    ui_mode: UiMode | None = Field(
+        default=None,
+        description="Null means never chosen, distinct from choosing the default.",
+    )
 
 
 class HealthResponse(BaseModel):

@@ -46,6 +46,8 @@ class Profile:
     is_invited: bool
     is_grandfathered: bool
     onboarding_completed_at: str | None
+    # B.19: NULL means "never chose" (see migrations/2026-09-07-beta-schema.sql).
+    ui_mode: str | None = None
 
 
 class Accounts:
@@ -99,6 +101,7 @@ class Accounts:
             is_invited=bool(row.get("is_invited")),
             is_grandfathered=bool(row.get("is_grandfathered")),
             onboarding_completed_at=row.get("onboarding_completed_at"),
+            ui_mode=row.get("ui_mode"),
         )
 
     def mark_onboarded(self, profile_id: str) -> None:
@@ -107,6 +110,16 @@ class Accounts:
             "/profiles",
             params={"id": f"eq.{profile_id}"},
             json={"onboarding_completed_at": "now()", "updated_at": "now()"},
+        )
+
+    def set_ui_mode(self, profile_id: str, ui_mode: str) -> None:
+        """Persist the caller's UI-mode choice (B.19), so it survives a new
+        device or session rather than resetting on every login."""
+        self._request(
+            "PATCH",
+            "/profiles",
+            params={"id": f"eq.{profile_id}"},
+            json={"ui_mode": ui_mode, "updated_at": "now()"},
         )
 
     # ---- interests ---------------------------------------------------
