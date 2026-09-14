@@ -88,7 +88,9 @@ supported production entry point — `adk web` remains a local dev tool.
   never on `title` or `detail`
 
 `openapi.json` is committed and CI-enforced — regenerate with
-`python scripts/export_openapi.py` after changing any route or model.
+`python scripts/export_openapi.py` after changing any route or model. The script
+also writes `contract.sha256`, which Lyra pins byte-for-byte: a PR that changes
+it must be followed by syncing both files into Lyra (the Wave 1 coordinator's job).
 
 Run locally: `uvicorn src.api.app:create_app --factory --reload`
 

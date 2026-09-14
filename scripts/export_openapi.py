@@ -4,6 +4,7 @@ Committed so the UI repo generates its client from a reviewed artifact
 rather than a running server, and so contract changes show up in diffs.
 """
 
+import hashlib
 import json
 import pathlib
 import sys
@@ -18,9 +19,12 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.api.app import create_app  # noqa: E402 — must follow the sys.path fix
 
 OUT = REPO_ROOT / "openapi.json"
+HASH = REPO_ROOT / "contract.sha256"
 
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmp:
         spec = create_app(db_path=f"{tmp}/export.db").openapi()
     OUT.write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n")
-    print(f"wrote {OUT}")
+    # Lyra pins the same digest; a change here is the signal to re-sync it.
+    HASH.write_text(hashlib.sha256(OUT.read_bytes()).hexdigest() + "\n")
+    print(f"wrote {OUT} and {HASH}")
