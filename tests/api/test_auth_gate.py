@@ -103,6 +103,34 @@ def test_new_route_defaults_to_401_unless_explicitly_allowlisted(client):
     assert reached["value"] is False, "the handler ran despite no credentials"
 
 
+def _all_api_routes(routes):
+    """Flatten nested routers into their `APIRoute` leaves.
+
+    FastAPI >=0.138 stores each `include_router` call as an opaque
+    `_IncludedRouter` wrapper in `app.routes` instead of flattening its
+    children eagerly, so a bare `isinstance(route, APIRoute)` filter over
+    `app.routes` silently matches nothing — every route in the app, guarded
+    or not. Verified by hand while adding B.15's waitlist route: removing its
+    entry from `PUBLIC_ROUTES` left `test_every_public_route_is_closed_unless_allowlisted`
+    green, because it was walking zero routes rather than finding one
+    unguarded.
+    """
+    from fastapi.routing import APIRoute
+
+    try:
+        from fastapi.routing import _IncludedRouter
+    except ImportError:  # older FastAPI already flattens eagerly
+        _IncludedRouter = ()
+
+    out = []
+    for route in routes:
+        if isinstance(route, APIRoute):
+            out.append(route)
+        elif _IncludedRouter and isinstance(route, _IncludedRouter):
+            out.extend(_all_api_routes(route.original_router.routes))
+    return out
+
+
 def _requires_identity(route) -> bool:
     """Whether get_current_user runs for this route, however it was attached.
 
@@ -136,14 +164,10 @@ def test_every_public_route_is_closed_unless_allowlisted(tmp_path):
     Internal cron routes are excluded: they are hidden from the schema and
     authenticated by a shared secret header instead of a user token.
     """
-    from fastapi.routing import APIRoute
-
     app = create_app(db_path=str(tmp_path / "gate.db"))
 
     unguarded = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    for route in _all_api_routes(app.routes):
         if route.path.startswith("/v1/internal/"):
             continue
         for method in route.methods - {"HEAD", "OPTIONS"}:

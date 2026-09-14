@@ -16,6 +16,8 @@ from .contract_stubs import router as contract_stub_router
 from .errors import PmieError, problem_response
 from .evaluation_routes import router as evaluation_router
 from .generation_routes import router as generation_router
+from .growth import Growth
+from .growth_routes import router as growth_router
 from .logging import configure_logging, new_request_id, request_id_var
 from .persistence import ReportPersistence
 from .pipeline import AnalysisPipeline, build_runner
@@ -79,6 +81,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
 
     accounts = Accounts()
     app.state.accounts = accounts
+    app.state.growth = Growth()
     app.state.jwks = JwksCache()
     app.state.sharing = ShareTokens()
 
@@ -131,6 +134,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     app.include_router(sharing_router)
     app.include_router(evaluation_router)
     app.include_router(generation_router)
+    app.include_router(growth_router)
     # Frozen contract: shapes agreed, logic pending. Each route 501s and
     # names the ROADMAP task that will land it. See contract_stubs.py.
     app.include_router(contract_stub_router)

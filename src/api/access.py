@@ -44,6 +44,9 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         # The reliability curve is an aggregate, not user data, and it is a
         # trust signal worth showing to a visitor who has not signed up yet.
         ("GET", "/v1/calibration"),
+        # Pre-signup email capture from the landing page (B.15) — the whole
+        # point is that it works before anyone has an account.
+        ("POST", "/v1/waitlist"),
     }
 )
 

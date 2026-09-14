@@ -20,15 +20,17 @@ Owners, by ROADMAP §0b task:
     B.7   TOTP enrolment            → auth/MFA
     B.10  referrals, quota, intent  → accounts
     B.11  explanation calibration   → evaluation
-    B.15  waitlist                  → growth
     B.17  moving-markets feed       → discovery
     B.19  UI-mode telemetry         → growth
+
+B.15 (waitlist) has already retired — see growth.py and growth_routes.py.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from .access import get_current_user
 from .errors import ErrorType, PmieError
 from .models import (
     CalibrationResponse,
@@ -39,11 +41,16 @@ from .models import (
     PayIntentRequest,
     ReferralSummary,
     UserEventRequest,
-    WaitlistRequest,
-    WaitlistResponse,
 )
 
-router = APIRouter(prefix="/v1")
+# Same fail-closed default as routes.py and sharing_routes.py: every stub
+# below will be a real, identity-scoped endpoint once it's built (mfa,
+# referrals, billing intent and events are all per-user; see each task's
+# acceptance criteria), so it inherits get_current_user now rather than
+# gaining it as an afterthought when the 501 is replaced with real logic.
+# The two genuinely public stubs (waitlist — since retired — and
+# calibration) opt out via access.PUBLIC_ROUTES, the only way to do so.
+router = APIRouter(prefix="/v1", dependencies=[Depends(get_current_user)])
 
 _RESPONSES: dict[int | str, dict] = {
     501: {
@@ -130,19 +137,6 @@ async def record_pay_intent(_body: PayIntentRequest) -> None:
 )
 async def record_event(_body: UserEventRequest) -> None:
     _stub("B.19")
-
-
-# ── B.15 — waitlist ──────────────────────────────────────────────────────────
-
-
-@router.post(
-    "/waitlist",
-    response_model=WaitlistResponse,
-    responses=_RESPONSES,
-    summary="Join the beta waitlist (public)",
-)
-async def join_waitlist(_body: WaitlistRequest) -> WaitlistResponse:
-    _stub("B.15")
 
 
 # ── B.11 — explanation calibration ───────────────────────────────────────────
