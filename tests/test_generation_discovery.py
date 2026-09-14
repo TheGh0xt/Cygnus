@@ -9,7 +9,11 @@ import json
 
 import pytest
 
-from src.generation.discovery import DiscoveryError, parse_moving_markets
+from src.generation.discovery import (
+    DiscoveryError,
+    SagittariusDiscovery,
+    parse_moving_markets,
+)
 
 
 def _tool_result(payload, is_error: bool = False):
@@ -122,3 +126,28 @@ class TestFailuresAreLoud:
 
         with pytest.raises(DiscoveryError):
             parse_moving_markets(CallToolResult(content=[], isError=False))
+
+
+class TestAuth:
+    """B.3, client side: this is the third of Cygnus's three MCP clients to
+    Sagittarius — the ADK agent toolsets and the evaluation worker's own
+    client are the other two — and needs the bearer token wired in
+    independently of both."""
+
+    def test_defaults_to_reading_mcp_bearer_token(self, monkeypatch):
+        monkeypatch.setenv("MCP_BEARER_TOKEN", "secret-token")
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        assert discovery._headers == {"Authorization": "Bearer secret-token"}
+
+    def test_defaults_to_no_headers_when_unset(self, monkeypatch):
+        monkeypatch.delenv("MCP_BEARER_TOKEN", raising=False)
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        assert discovery._headers == {}
+
+    def test_explicit_headers_override_the_environment(self, monkeypatch):
+        monkeypatch.setenv("MCP_BEARER_TOKEN", "env-token")
+        discovery = SagittariusDiscovery(
+            "http://localhost:8080/mcp",
+            headers={"Authorization": "Bearer explicit-token"},
+        )
+        assert discovery._headers == {"Authorization": "Bearer explicit-token"}

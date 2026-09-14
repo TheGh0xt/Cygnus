@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 
+from ..config import mcp_auth_headers, mcp_http_client
 from .selector import Candidate
 
 logger = logging.getLogger("cygnus.generation.discovery")
@@ -115,9 +116,21 @@ class SagittariusDiscovery:
     delegates to is unit-tested above.
     """
 
-    def __init__(self, mcp_url: str, timeout: float | None = None):
+    def __init__(
+        self,
+        mcp_url: str,
+        timeout: float | None = None,
+        headers: dict[str, str] | None = None,
+    ):
         self.mcp_url = mcp_url
         self._timeout = timeout
+        # B.3: the same bearer token Sagittarius enforces on /mcp. This MCP
+        # client is separate from the ADK agent toolsets (src/config.py) and
+        # the evaluation worker's own client, so it needs the header wired in
+        # independently. Defaults to reading MCP_BEARER_TOKEN itself so the
+        # one production call site (app.py) doesn't have to remember to pass
+        # it.
+        self._headers = mcp_auth_headers() if headers is None else headers
 
     async def moving_markets(
         self, categories: list[str] | None = None, limit: int = 20
@@ -131,7 +144,12 @@ class SagittariusDiscovery:
 
         try:
             async with (
-                streamable_http_client(self.mcp_url) as (read, write, _),
+                mcp_http_client(self._headers) as http_client,
+                streamable_http_client(self.mcp_url, http_client=http_client) as (
+                    read,
+                    write,
+                    _,
+                ),
                 ClientSession(read, write) as session,
             ):
                 await session.initialize()

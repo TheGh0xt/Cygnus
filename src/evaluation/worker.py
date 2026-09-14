@@ -248,8 +248,12 @@ class SagittariusPriceFetcher:
     EventIntelligenceContext.
     """
 
-    def __init__(self, mcp_url: str):
+    def __init__(self, mcp_url: str, headers: dict[str, str] | None = None):
         self.mcp_url = mcp_url
+        # B.3: the same bearer token Sagittarius enforces on /mcp. This is
+        # the worker's own MCP client — separate from the agents' toolsets
+        # in ../config.py — so it needs the header wired in independently.
+        self._headers = headers or {}
 
     def current_probability(self, market_slug: str) -> float | None:
         import asyncio
@@ -260,9 +264,16 @@ class SagittariusPriceFetcher:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
 
+        from ..config import mcp_http_client
+
         try:
             async with (
-                streamable_http_client(self.mcp_url) as (read, write, _),
+                mcp_http_client(self._headers) as http_client,
+                streamable_http_client(self.mcp_url, http_client=http_client) as (
+                    read,
+                    write,
+                    _,
+                ),
                 ClientSession(read, write) as session,
             ):
                 await session.initialize()
@@ -296,6 +307,8 @@ class SagittariusPriceFetcher:
 def main() -> None:
     import os
 
+    from ..config import mcp_auth_headers
+
     parser = argparse.ArgumentParser(description="PMIE T+48h evaluation worker")
     parser.add_argument(
         "--db", required=True, help="path to the memory store SQLite db"
@@ -304,7 +317,8 @@ def main() -> None:
 
     store = build_memory_store(args.db)
     fetcher = SagittariusPriceFetcher(
-        os.getenv("SAGITTARIUS_MCP_URL", "http://localhost:8080/mcp")
+        os.getenv("SAGITTARIUS_MCP_URL", "http://localhost:8080/mcp"),
+        headers=mcp_auth_headers(),
     )
     logging.basicConfig(
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"

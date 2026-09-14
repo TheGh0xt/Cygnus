@@ -59,6 +59,15 @@ services:
       - key: PMIE_CRON_SECRET
         sync: false
 
+      # B.3: sent as `Authorization: Bearer <token>` on every MCP connection
+      # to Sagittarius. Must be the same value as Sagittarius's own
+      # MCP_BEARER_TOKEN (set on the Sagittarius Render service) — H4 in
+      # WAVE1_LEDGER.md. Leave unset until H4 sets it: Sagittarius does not
+      # yet enforce this, but wiring both sides on before enforcement lands
+      # means turning it on later is a Sagittarius-side change only.
+      - key: MCP_BEARER_TOKEN
+        sync: false
+
       # PMIE_AUTH_DISABLED is deliberately absent. Authentication is on unless
       # explicitly switched off, and a deployed instance must never have it
       # off: an unauthenticated public endpoint would let anyone spend the

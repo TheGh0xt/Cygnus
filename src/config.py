@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 import httpx
 from google.adk.tools.mcp_tool.mcp_session_manager import (
     StreamableHTTPConnectionParams,
 )
+from mcp.shared._httpx_utils import create_mcp_http_client
 
 logger = logging.getLogger("cygnus.config")
 
@@ -41,6 +43,21 @@ _DEFAULT_TIMEOUT_SECONDS = 90.0
 
 def sagittarius_url() -> str:
     return os.getenv("SAGITTARIUS_MCP_URL", _DEFAULT_URL)
+
+
+def mcp_auth_headers() -> dict[str, str]:
+    """The Authorization header to send on every MCP connection to Sagittarius.
+
+    MCP_BEARER_TOKEN is the same env var name and value Sagittarius reads to
+    enforce bearer auth on /mcp (Sagittarius#16 / B.3). With it unset, this
+    returns {} and every caller's behaviour is exactly what it was before
+    B.3 — this side must deploy and be confirmed working before Sagittarius
+    turns enforcement on, or every MCP call starts failing with 401.
+    """
+    token = os.getenv("MCP_BEARER_TOKEN")
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
 
 
 def sagittarius_timeout() -> float:
@@ -62,7 +79,52 @@ def sagittarius_connection_params() -> StreamableHTTPConnectionParams:
     return StreamableHTTPConnectionParams(
         url=sagittarius_url(),
         timeout=sagittarius_timeout(),
+        headers=mcp_auth_headers() or None,
     )
+
+
+@asynccontextmanager
+async def mcp_http_client(headers: dict[str, str] | None = None):
+    """The httpx.AsyncClient to hand a raw `streamable_http_client(..., http_client=...)`
+    call, or None — as an async context manager, entered with `async with`.
+
+    ADK's own StreamableHTTPConnectionParams takes `headers` directly (see
+    sagittarius_connection_params above); the plain `mcp` SDK function used by
+    Cygnus's own MCP clients — the evaluation worker and generation discovery
+    — does not, so those build the client by hand instead. Centralised here
+    so every raw MCP client goes through the same auth wiring; a caller
+    inventing its own client-construction logic is exactly how a bearer token
+    gets forgotten on one Sagittarius call site while every other one
+    enforces it.
+
+    Two things this has to get right that a bare httpx.AsyncClient(headers=...)
+    doesn't:
+
+    - Timeouts. streamable_http_client's own default client is built via
+      create_mcp_http_client(), which sets a 30s connect and a 300s read
+      timeout plus follow_redirects=True. httpx's own default is a flat 5s
+      and no redirects — fine for nothing here, and fatal against a
+      Sagittarius that takes ~50s to wake from a free-plan sleep. Built with
+      the same create_mcp_http_client() the SDK uses for its own default, so
+      the two stay in lockstep as the SDK's defaults evolve.
+    - Lifecycle. streamable_http_client only closes a client it created
+      itself ("Only manage client lifecycle if we created it" — a client
+      passed in via http_client= is the caller's to close. A plain function
+      returning an AsyncClient meant every call leaked a connection pool);
+      this is why it's a context manager rather than a function, so the
+      caller's `async with mcp_http_client(...) as http_client:` guarantees
+      it's closed on the way out.
+
+    Yields None (not an empty-headers client) when there's nothing to add:
+    the mcp SDK then builds and manages its own default client, matching
+    behaviour from before B.3 exactly.
+    """
+    resolved = headers if headers is not None else mcp_auth_headers()
+    if not resolved:
+        yield None
+        return
+    async with create_mcp_http_client(headers=resolved) as client:
+        yield client
 
 
 def warm_sagittarius(timeout: float = 60.0) -> bool:
