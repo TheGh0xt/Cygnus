@@ -580,7 +580,8 @@
             "type": "string"
           },
           "recovery_codes": {
-            "description": "Single-use fallbacks. Shown once, stored hashed.",
+            "deprecated": true,
+            "description": "Always empty. Supabase Auth's MFA API has no recovery-code concept; recovery is a second, backup TOTP factor instead \u2014 enroll again while already verified (at aal2).",
             "items": {
               "type": "string"
             },
@@ -1782,8 +1783,27 @@
             },
             "description": "Successful Response"
           },
-          "501": {
-            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
         "summary": "Whether TOTP is active for this user"
@@ -1803,8 +1823,27 @@
             },
             "description": "Successful Response"
           },
-          "501": {
-            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
         "summary": "Begin TOTP enrolment"
@@ -1834,18 +1873,38 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ProblemResponse"
                 }
-              }
+              },
+              "application/problem+json": {}
             },
-            "description": "Validation Error"
+            "description": "The code is incorrect or has expired"
           },
-          "501": {
-            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
         "summary": "Confirm a TOTP code and activate the factor"

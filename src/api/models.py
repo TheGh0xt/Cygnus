@@ -187,7 +187,12 @@ class MfaEnrollResponse(BaseModel):
     secret: str = Field(description="Base32 TOTP secret. Never returned again.")
     qr_uri: str = Field(description="otpauth:// URI for a QR code.")
     recovery_codes: list[str] = Field(
-        description="Single-use fallbacks. Shown once, stored hashed."
+        deprecated=True,
+        description=(
+            "Always empty. Supabase Auth's MFA API has no recovery-code "
+            "concept; recovery is a second, backup TOTP factor instead — "
+            "enroll again while already verified (at aal2)."
+        ),
     )
 
 

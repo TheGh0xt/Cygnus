@@ -26,6 +26,7 @@ class ErrorType(str, Enum):
     ANALYSIS_NOT_FOUND = "analysis-not-found"
     INTERNAL_ERROR = "internal-error"
     NOT_IMPLEMENTED = "not-implemented"
+    MFA_REQUIRED = "mfa-required"
 
 
 _TITLES = {
@@ -38,6 +39,7 @@ _TITLES = {
     ErrorType.ANALYSIS_NOT_FOUND: "Analysis not found",
     ErrorType.INTERNAL_ERROR: "Internal error",
     ErrorType.NOT_IMPLEMENTED: "Not implemented yet",
+    ErrorType.MFA_REQUIRED: "TOTP verification required",
 }
 
 
