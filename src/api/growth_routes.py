@@ -17,6 +17,7 @@ import re
 from fastapi import APIRouter, Depends, Request
 
 from .access import get_current_user
+from .accounts import AccountsError
 from .auth import CurrentUser
 from .errors import ErrorType, PmieError
 from .growth import GrowthError
@@ -34,6 +35,47 @@ authenticated_router = APIRouter(prefix="/v1", dependencies=[Depends(get_current
 # deliverable address, not what an RFC 5322 parser would. A landing-page form
 # should not reject a real inbox over pedantry.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# `name` values are our own event vocabulary (e.g. "ui_mode_switched"), never
+# free text, so lowercase snake_case is the actual contract, not just a nicety.
+_EVENT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_MAX_PROPERTIES = 20
+_MAX_PROPERTY_KEY_LEN = 64
+_MAX_PROPERTY_VALUE_LEN = 500
+
+
+def _validate_event(body: UserEventRequest) -> None:
+    """Bound what reaches `user_events.properties` (unbounded jsonb).
+
+    Nothing else on the write path checks this — Growth.record_event forwards
+    the dict verbatim — so an oversized or malformed payload would otherwise
+    land straight in Supabase.
+    """
+    if not _EVENT_NAME_RE.match(body.name):
+        raise PmieError(
+            ErrorType.INVALID_REQUEST,
+            "name must be lowercase snake_case, at most 64 characters.",
+            status=422,
+        )
+    if len(body.properties) > _MAX_PROPERTIES:
+        raise PmieError(
+            ErrorType.INVALID_REQUEST,
+            f"properties may have at most {_MAX_PROPERTIES} keys.",
+            status=422,
+        )
+    for key, value in body.properties.items():
+        if not key or len(key) > _MAX_PROPERTY_KEY_LEN:
+            raise PmieError(
+                ErrorType.INVALID_REQUEST,
+                f"property keys must be 1-{_MAX_PROPERTY_KEY_LEN} characters.",
+                status=422,
+            )
+        if len(value) > _MAX_PROPERTY_VALUE_LEN:
+            raise PmieError(
+                ErrorType.INVALID_REQUEST,
+                f"property values must be at most {_MAX_PROPERTY_VALUE_LEN} characters.",
+                status=422,
+            )
 
 
 @router.post(
@@ -94,6 +136,8 @@ def record_event(
     request: Request,
     user: CurrentUser = Depends(get_current_user),
 ) -> None:
+    _validate_event(body)
+
     growth = request.app.state.growth
     if not growth.configured:
         raise PmieError(
@@ -111,3 +155,21 @@ def record_event(
         raise PmieError(
             ErrorType.INTERNAL_ERROR, "Could not record that event.", status=503
         ) from exc
+
+    # The actual point of Profile.ui_mode/MeResponse.ui_mode (Cygnus#32
+    # review): a mode switch must persist on the profile, not just get
+    # logged, so it survives a new device or session.
+    if body.name == "ui_mode_switched" and body.ui_mode is not None:
+        accounts = request.app.state.accounts
+        if not accounts.configured:
+            raise PmieError(
+                ErrorType.INTERNAL_ERROR, "Accounts are not configured.", status=503
+            )
+        try:
+            accounts.set_ui_mode(user.id, body.ui_mode.value)
+        except AccountsError as exc:
+            raise PmieError(
+                ErrorType.INTERNAL_ERROR,
+                "Could not update your preference.",
+                status=503,
+            ) from exc
