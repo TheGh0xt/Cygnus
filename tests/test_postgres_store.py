@@ -157,6 +157,72 @@ class TestToStoredStatedConfidenceFallback:
         assert stored.stated_confidence == 0.9
 
 
+class TestGetScoredConfidenceOutcomes:
+    """B.11 review: the public /v1/calibration route must not pull the full
+    report_json for every scored row on every anonymous request, and must not
+    be silently truncated by PostgREST's default 1000-row response cap."""
+
+    def test_selects_only_the_three_needed_columns(self):
+        store = RecordingStore(response=[[]])
+        store.get_scored_confidence_outcomes()
+        params = store.calls[0]["params"]
+        assert params["outcome"] == "not.is.null"
+        assert params["select"] == "stated_confidence_score,confidence_score,outcome"
+
+    def test_falls_back_to_confidence_score_when_stated_is_absent(self):
+        store = RecordingStore(
+            response=[[{"confidence_score": 0.6, "outcome": "REVERSED"}]]
+        )
+        assert store.get_scored_confidence_outcomes() == [(0.6, "REVERSED")]
+
+    def test_single_page_stops_after_one_request(self):
+        store = RecordingStore(
+            response=[
+                [
+                    {
+                        "stated_confidence_score": 0.8,
+                        "confidence_score": 0.9,
+                        "outcome": "CONFIRMED",
+                    }
+                ]
+            ]
+        )
+        result = store.get_scored_confidence_outcomes()
+        assert result == [(0.8, "CONFIRMED")]
+        assert len(store.calls) == 1
+
+    def test_paginates_past_a_full_first_page(self):
+        # A fake that returns a full page, then a second, smaller page —
+        # exactly what a store with more scored reports than PostgREST's
+        # default 1000-row cap would hand back one page at a time.
+        page_size = 2
+        first_page = [
+            {
+                "stated_confidence_score": 0.7,
+                "confidence_score": 0.7,
+                "outcome": "CONFIRMED",
+            }
+            for _ in range(page_size)
+        ]
+        second_page = [
+            {
+                "stated_confidence_score": 0.6,
+                "confidence_score": 0.6,
+                "outcome": "REVERSED",
+            }
+        ]
+        store = RecordingStore(response=[first_page, second_page])
+        store._PAGE_SIZE = page_size
+
+        result = store.get_scored_confidence_outcomes()
+
+        assert result == [(0.7, "CONFIRMED")] * page_size + [(0.6, "REVERSED")]
+        assert len(store.calls) == 2
+        assert store.calls[0]["params"]["limit"] == page_size
+        assert store.calls[0]["params"]["offset"] == 0
+        assert store.calls[1]["params"]["offset"] == page_size
+
+
 class TestRecordEvaluation:
     def test_missing_id_raises_keyerror(self):
         # Same contract as the SQLite store: a missing id is a caller bug.

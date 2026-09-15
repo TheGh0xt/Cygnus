@@ -1,9 +1,13 @@
 -- ROADMAP B.11 — explanation calibration.
 --
--- Apply to the Supabase Postgres (SQL editor or CLI). Until it is applied,
--- Cygnus keeps working: the code reads this column with .get() and falls
--- back to confidence_score when it is absent, so nothing 500s. Calibration
--- just bins on the wrong value in the meantime — see below.
+-- MUST be applied to the Supabase Postgres (SQL editor or CLI) BEFORE this
+-- code deploys. This is a precondition, not a nice-to-have: PostgresMemoryStore
+-- .save_report sends stated_confidence_score in every insert payload, and
+-- PostgREST rejects an insert that names a column the table does not have
+-- (PGRST204). Deploying this code before the migration runs means every
+-- report save fails, not just calibration reading a stale value. The read
+-- side's .get()-with-fallback (see below) only covers reads that predate the
+-- column existing; it cannot save you from a write that 400s.
 --
 -- Why this column exists: analysis_reports.confidence_score is deliberately
 -- mutable. The T+48h evaluation worker overwrites it (record_checkpoint's

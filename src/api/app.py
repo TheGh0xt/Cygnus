@@ -12,6 +12,7 @@ from ..generation.discovery import SagittariusDiscovery
 from ..memory import build_memory_store
 from .accounts import Accounts
 from .auth import JwksCache
+from .calibration_routes import CalibrationCache
 from .calibration_routes import router as calibration_router
 from .contract_stubs import router as contract_stub_router
 from .discovery_routes import router as discovery_router
@@ -94,6 +95,7 @@ def create_app(db_path: str = "pmie_memory.db") -> FastAPI:
     app.state.mfa_factor_lookup = build_factor_lookup()
     app.state.jwks = JwksCache()
     app.state.sharing = ShareTokens()
+    app.state.calibration_cache = CalibrationCache()
 
     # Auth is on by default. Disabling it is a startup-time decision captured
     # here, so a stray environment variable cannot switch off authentication

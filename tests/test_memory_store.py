@@ -111,6 +111,78 @@ def test_stated_confidence_defaults_to_confidence_score_when_never_evaluated(sto
     assert stored.stated_confidence == 0.7
 
 
+class TestMigratesOldSchemaDb:
+    """B.11 review: CREATE TABLE IF NOT EXISTS is a no-op against a table that
+    already exists, so an on-disk dev DB created before this column existed
+    would otherwise never gain it — the same PostgREST-unknown-column gap the
+    Postgres migration guards against, just on SQLite's dev/test path."""
+
+    def _make_pre_b11_db(self, path) -> None:
+        import sqlite3
+
+        conn = sqlite3.connect(str(path))
+        conn.executescript(
+            """
+            CREATE TABLE analysis_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                market_id TEXT NOT NULL,
+                market_slug TEXT NOT NULL,
+                report_json TEXT NOT NULL,
+                confidence_score REAL NOT NULL,
+                price_at_report REAL,
+                created_at TEXT NOT NULL,
+                evaluated_at TEXT,
+                outcome TEXT
+            );
+            CREATE TABLE report_evaluations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id INTEGER NOT NULL REFERENCES analysis_reports (id),
+                horizon_hours INTEGER NOT NULL,
+                observed_price REAL NOT NULL,
+                outcome TEXT NOT NULL,
+                is_canonical INTEGER NOT NULL DEFAULT 0,
+                evaluated_at TEXT NOT NULL,
+                UNIQUE (report_id, horizon_hours)
+            );
+            """
+        )
+        conn.commit()
+        conn.close()
+
+    def test_opening_an_old_schema_db_does_not_raise(self, tmp_path):
+        db_path = tmp_path / "old.db"
+        self._make_pre_b11_db(db_path)
+
+        SqliteMemoryStore(db_path)  # must not raise
+
+    def test_column_exists_after_opening(self, tmp_path):
+        import sqlite3
+
+        db_path = tmp_path / "old.db"
+        self._make_pre_b11_db(db_path)
+
+        SqliteMemoryStore(db_path)
+
+        conn = sqlite3.connect(str(db_path))
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(analysis_reports)")
+        }
+        conn.close()
+        assert "stated_confidence_score" in columns
+
+    def test_store_is_usable_after_migrating(self, tmp_path):
+        db_path = tmp_path / "old.db"
+        self._make_pre_b11_db(db_path)
+
+        store = SqliteMemoryStore(db_path)
+        report_id = store.save_report(
+            make_report(confidence=0.7), "slug", 0.5, created_at=NOW
+        )
+        stored = store.get_history_for_market("0xabc")[0]
+        assert report_id > 0
+        assert stored.stated_confidence == 0.7
+
+
 class TestGetScoredReports:
     """B.11: the calibration endpoint bins reports that have a canonical
     (48h) outcome — get_scored_reports is that read."""
@@ -146,6 +218,28 @@ class TestGetScoredReports:
         scored = store.get_scored_reports()
         assert len(scored) == 1
         assert scored[0].report.market_id == "0xaaa"
+
+
+class TestGetScoredConfidenceOutcomes:
+    """B.11 review: the public calibration route must not pull the full
+    report_json for every scored row on every anonymous request — this is
+    the narrow (stated_confidence, outcome) read behind it."""
+
+    def test_unevaluated_reports_are_excluded(self, store):
+        store.save_report(make_report(), "slug", 0.58, created_at=NOW)
+        assert store.get_scored_confidence_outcomes() == []
+
+    def test_returns_stated_confidence_and_outcome_pairs(self, store):
+        report_id = store.save_report(
+            make_report(confidence=0.8), "slug", 0.58, created_at=NOW
+        )
+        store.record_evaluation(
+            report_id,
+            new_confidence=0.85,
+            outcome="CONFIRMED",
+            evaluated_at=NOW + timedelta(hours=49),
+        )
+        assert store.get_scored_confidence_outcomes() == [(0.8, "CONFIRMED")]
 
 
 def test_history_is_per_market_and_oldest_first(store):
