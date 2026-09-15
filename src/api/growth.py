@@ -112,3 +112,37 @@ class Growth:
             raise GrowthError(
                 f"growth store returned {response.status_code}: {response.text[:200]}"
             )
+
+    def record_pay_intent(
+        self,
+        profile_id: str,
+        price_shown_usd: float,
+        plan: str,
+        list_price_usd: float,
+    ) -> None:
+        """One user_events row for a quota-wall click (B.10).
+
+        No money moves during beta — see PayIntentRequest. Reuses user_events
+        rather than a dedicated table: this is a product event like any
+        other, just with its price/plan carried in properties. `list_price_usd`
+        is the server's own PRO_MONTHLY_PRICE_USD, recorded next to whatever
+        the client claims it showed, so the two can be compared later.
+        """
+        response = self._request(
+            "POST",
+            "/user_events",
+            json={
+                "profile_id": profile_id,
+                "name": "pay_intent_clicked",
+                "ui_mode": None,
+                "properties": {
+                    "price_shown_usd": str(price_shown_usd),
+                    "list_price_usd": str(list_price_usd),
+                    "plan": plan,
+                },
+            },
+        )
+        if response.status_code >= 400:
+            raise GrowthError(
+                f"growth store returned {response.status_code}: {response.text[:200]}"
+            )

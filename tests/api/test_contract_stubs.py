@@ -10,6 +10,7 @@ quietly mistaken for a working endpoint: it always carries the
 from __future__ import annotations
 
 import tempfile
+import warnings
 from pathlib import Path
 
 import pytest
@@ -20,15 +21,7 @@ from src.api.app import create_app
 # Every frozen route, with the ROADMAP §0b task that retires it. Deleting a row
 # here is how a stub graduates — and doing so without implementing the route
 # makes test_no_stub_is_silently_dropped fail.
-FROZEN: list[tuple[str, str, dict | None, str]] = [
-    ("get", "/v1/me/referrals", None, "B.10"),
-    (
-        "post",
-        "/v1/billing/intent",
-        {"price_shown_usd": 19.0, "plan": "pro-monthly"},
-        "B.10",
-    ),
-]
+FROZEN: list[tuple[str, str, dict | None, str]] = []
 
 
 @pytest.fixture
@@ -78,6 +71,24 @@ def test_no_stub_is_silently_dropped(client):
         template = path.replace("/abc", "/{analysis_id}")
         operation = schema["paths"][template][method]
         assert operation.get("summary"), f"{method.upper()} {path} has no summary"
+
+
+def test_no_route_has_a_duplicate_operation_id(client):
+    """Guards against the bug this file's history caught once: a stub left
+
+    behind in contract_stubs.py alongside its own real implementation
+    elsewhere, which silently shadowed the real handler (every request
+    matched the still-registered stub first). It never failed a test —
+    the stub answered "returns 501" just fine — and the only visible symptom
+    was a "Duplicate Operation ID" warning during schema generation.
+    """
+    client.app.openapi_schema = None  # force regeneration
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        client.app.openapi()
+
+    duplicates = [w for w in caught if "Duplicate Operation ID" in str(w.message)]
+    assert not duplicates, [str(w.message) for w in duplicates]
 
 
 def test_schema_does_not_depend_on_runtime_config(monkeypatch):

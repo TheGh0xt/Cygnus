@@ -17,13 +17,22 @@ def client(monkeypatch, tmp_path):
 
 
 class FakeGrowth:
-    def __init__(self, result=None, error=None, event_error=None, order=None):
+    def __init__(
+        self,
+        result=None,
+        error=None,
+        event_error=None,
+        intent_error=None,
+        order=None,
+    ):
         self.result = result or WaitlistJoinResult(already_registered=False)
         self.error = error
         self.event_error = event_error
+        self.intent_error = intent_error
         self.configured = True
         self.calls: list[tuple[str, str | None]] = []
         self.event_calls: list[tuple] = []
+        self.intent_calls: list[tuple] = []
         self._order = order
 
     def join_waitlist(self, email, referral_code):
@@ -38,6 +47,11 @@ class FakeGrowth:
             self._order.append("record_event")
         if self.event_error:
             raise self.event_error
+
+    def record_pay_intent(self, profile_id, price_shown_usd, plan, list_price_usd):
+        self.intent_calls.append((profile_id, price_shown_usd, plan, list_price_usd))
+        if self.intent_error:
+            raise self.intent_error
 
 
 class FakeAccountsForEvents:
@@ -340,5 +354,95 @@ class TestEventsRoute:
             "/v1/events",
             headers=_auth("user-1"),
             json={"name": "ui_mode_switched", "ui_mode": "TERMINAL"},
+        )
+        assert response.status_code == 503
+
+
+class TestBillingIntentRoute:
+    def test_requires_a_token(self, client):
+        client.app.state.growth = FakeGrowth()
+        response = client.post(
+            "/v1/billing/intent", json={"price_shown_usd": 19.0, "plan": "pro-monthly"}
+        )
+        assert response.status_code == 401
+
+    def test_records_the_intent_for_the_caller(self, client):
+        client.app.state.jwks = FakeJwks()
+        fake = FakeGrowth()
+        client.app.state.growth = fake
+
+        response = client.post(
+            "/v1/billing/intent",
+            headers=_auth("user-1"),
+            json={"price_shown_usd": 19.0, "plan": "pro-monthly"},
+        )
+
+        assert response.status_code == 204
+        assert fake.intent_calls == [("user-1", 19.0, "pro-monthly", 19.0)]
+
+    def test_records_the_servers_own_list_price_regardless_of_client_value(
+        self, client
+    ):
+        """A client could send any price_shown_usd; the server's own
+
+        PRO_MONTHLY_PRICE_USD is what gets recorded as list_price_usd,
+        independent of whatever the client claims it displayed.
+        """
+        client.app.state.jwks = FakeJwks()
+        fake = FakeGrowth()
+        client.app.state.growth = fake
+
+        client.post(
+            "/v1/billing/intent",
+            headers=_auth("user-1"),
+            json={"price_shown_usd": 0.0, "plan": "pro-monthly"},
+        )
+
+        assert fake.intent_calls == [("user-1", 0.0, "pro-monthly", 19.0)]
+
+    def test_a_caller_cannot_record_for_someone_else(self, client):
+        """profile_id always comes from the verified token — there is no
+
+        such field on PayIntentRequest at all.
+        """
+        client.app.state.jwks = FakeJwks()
+        fake = FakeGrowth()
+        client.app.state.growth = fake
+
+        client.post(
+            "/v1/billing/intent",
+            headers=_auth("user-1"),
+            json={"price_shown_usd": 19.0, "plan": "pro-monthly"},
+        )
+        client.post(
+            "/v1/billing/intent",
+            headers=_auth("user-2"),
+            json={"price_shown_usd": 19.0, "plan": "pro-monthly"},
+        )
+
+        assert [c[0] for c in fake.intent_calls] == ["user-1", "user-2"]
+
+    def test_not_configured_is_503(self, client):
+        client.app.state.jwks = FakeJwks()
+        fake = FakeGrowth()
+        fake.configured = False
+        client.app.state.growth = fake
+
+        response = client.post(
+            "/v1/billing/intent",
+            headers=_auth("user-1"),
+            json={"price_shown_usd": 19.0, "plan": "pro-monthly"},
+        )
+        assert response.status_code == 503
+
+    def test_store_failure_is_503(self, client):
+        client.app.state.jwks = FakeJwks()
+        fake = FakeGrowth(intent_error=GrowthError("unreachable"))
+        client.app.state.growth = fake
+
+        response = client.post(
+            "/v1/billing/intent",
+            headers=_auth("user-1"),
+            json={"price_shown_usd": 19.0, "plan": "pro-monthly"},
         )
         assert response.status_code == 503

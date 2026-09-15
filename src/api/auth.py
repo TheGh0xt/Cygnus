@@ -50,6 +50,10 @@ class CurrentUser:
     # minted before MFA existed for this user, which is why it defaults to
     # the lower level rather than failing to decode.
     aal: str = "aal1"
+    # False on a token minted before this claim existed for a user, and for
+    # any signup that has not verified yet — never treated as "unknown means
+    # verified" (B.10's referral conversion depends on this being accurate).
+    email_verified: bool = False
 
 
 def supabase_url() -> str:
@@ -107,6 +111,7 @@ def decode_token(token: str, jwks: dict) -> CurrentUser:
         id=str(subject),
         email=claims.get("email"),
         aal=claims.get("aal") or "aal1",
+        email_verified=bool(claims.get("email_verified")),
     )
 
 

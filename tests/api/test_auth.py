@@ -76,6 +76,17 @@ class TestDecodeToken:
         assert user.id == "11111111-2222-3333-4444-555555555555"
         assert user.email == "tester@example.com"
 
+    def test_email_verified_claim_true(self):
+        user = decode_token(_token(email_verified=True), _jwks())
+        assert user.email_verified is True
+
+    def test_email_verified_claim_defaults_to_false(self):
+        # Absent on a token minted before this claim existed for a user, or
+        # for a password-signup that never verified — B.10's referral
+        # conversion must not treat "unknown" as "verified".
+        user = decode_token(_token(), _jwks())
+        assert user.email_verified is False
+
     def test_expired_token_is_rejected(self):
         with pytest.raises(AuthError):
             decode_token(_token(exp=int(time.time()) - 60), _jwks())

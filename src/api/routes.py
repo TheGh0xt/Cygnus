@@ -5,10 +5,18 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from .access import get_current_user
-from .accounts import FREE_MONTHLY_ANALYSES, AccountsError
+from .accounts import (
+    PRO_MONTHLY_PRICE_USD,
+    AccountsError,
+    ReferralCounts,
+    bonus_analyses_for,
+    effective_allowance,
+    next_reward_at,
+)
 from .auth import CurrentUser
 from .config import describe_supabase_config
 from .dependencies import require_invited
@@ -25,6 +33,7 @@ from .models import (
     MeResponse,
     ProblemResponse,
     ReadyResponse,
+    ReferralSummary,
     UsageSummary,
     extract_slug,
 )
@@ -99,11 +108,38 @@ async def create_analysis(
     A full analysis takes 60-120 seconds across four stages, so the work
     happens in the background and progress arrives over the SSE endpoint.
     """
-    require_invited(request, user)
+    profile = require_invited(request, user)
 
-    # After the invite check, so an uninvited caller is told that rather than
-    # being rate limited, and before any work starts — this endpoint is the
-    # expensive one and the limit exists to protect the model budget.
+    # After the invite check (so an uninvited caller hears that instead) and
+    # before the rate limiter (running out of monthly quota is a more
+    # fundamental block than a burst limit). Skipped when accounts isn't
+    # configured — require_invited already 503s in that case unless auth is
+    # disabled, so this only ever runs unenforced in the local dev bypass.
+    # Also skipped for grandfathered accounts: exempt from the quota entirely.
+    accounts = request.app.state.accounts
+    if accounts.configured and not profile.is_grandfathered:
+        try:
+            used = await run_in_threadpool(accounts.monthly_usage, user.id)
+            counts = await run_in_threadpool(accounts.referral_counts, user.id)
+        except AccountsError as exc:
+            raise PmieError(
+                ErrorType.INTERNAL_ERROR, "Could not verify your usage.", status=503
+            ) from exc
+
+        allowance = effective_allowance(counts.converted_count)
+        if used >= allowance:
+            raise PmieError(
+                ErrorType.QUOTA_EXCEEDED,
+                f"You've used all {allowance} analyses for this month. Upgrade "
+                f"to Pro (${PRO_MONTHLY_PRICE_USD:.0f}/month) for more, or wait "
+                "until it resets on the 1st.",
+                status=403,
+            )
+
+    # After the invite and quota checks, so an uninvited or over-quota caller
+    # is told that rather than being rate limited, and before any work starts
+    # — this endpoint is the expensive one and the limit exists to protect
+    # the model budget.
     try:
         request.app.state.limiter.check(user.id)
     except RateLimitExceeded as exc:
@@ -284,11 +320,16 @@ async def stream_analysis(
     summary="The signed-in user",
     responses=_AUTH_ERRORS,
 )
-async def me(request: Request, user: CurrentUser = Depends(get_current_user)) -> dict:
+def me(request: Request, user: CurrentUser = Depends(get_current_user)) -> dict:
     """The caller's profile, interests and usage.
 
     One call so the client can render the whole authenticated shell — header,
     usage indicator, onboarding state — without a waterfall of requests.
+
+    Plain `def`, matching `join_waitlist`'s fix: every call here is a
+    blocking Supabase request (up to ~6 of them, once referral attribution
+    and conversion are included), and an `async def` with no `await` runs
+    them all inline on the single event loop this process uses.
     """
     accounts = request.app.state.accounts
     if not accounts.configured:
@@ -300,6 +341,11 @@ async def me(request: Request, user: CurrentUser = Depends(get_current_user)) ->
         profile = accounts.get_profile(user.id)
         interests = accounts.get_interests(user.id) if profile else []
         used = accounts.monthly_usage(user.id) if profile else 0
+        counts = (
+            accounts.referral_counts(user.id)
+            if profile
+            else ReferralCounts(referred_count=0, converted_count=0)
+        )
     except AccountsError as exc:
         raise PmieError(
             ErrorType.INTERNAL_ERROR, "Could not load your account.", status=503
@@ -309,6 +355,15 @@ async def me(request: Request, user: CurrentUser = Depends(get_current_user)) ->
         raise PmieError(
             ErrorType.INVALID_REQUEST, "No account found for this session.", status=401
         )
+
+    # Best-effort, same posture as record_usage: neither call may fail /me.
+    # sync_referral_attribution's return, not just profile.referred_by (read
+    # above, so stale if this call is the one that just attributed), decides
+    # whether a conversion PATCH is worth trying — most users were never
+    # referred, and that PATCH would otherwise run on every verified load.
+    referred = accounts.sync_referral_attribution(profile, user.email)
+    if user.email_verified and referred:
+        accounts.mark_referral_converted(profile.id)
 
     return {
         "id": profile.id,
@@ -320,10 +375,43 @@ async def me(request: Request, user: CurrentUser = Depends(get_current_user)) ->
         "interests": interests,
         "usage": UsageSummary(
             analyses_this_month=used,
-            free_monthly_allowance=FREE_MONTHLY_ANALYSES,
+            free_monthly_allowance=effective_allowance(counts.converted_count),
+            enforced=not profile.is_grandfathered,
         ),
         "ui_mode": profile.ui_mode,
     }
+
+
+@router.get(
+    "/me/referrals",
+    response_model=ReferralSummary,
+    summary="This user's referral code and its standing",
+    responses=_AUTH_ERRORS,
+)
+def referrals(
+    request: Request, user: CurrentUser = Depends(get_current_user)
+) -> ReferralSummary:
+    accounts = request.app.state.accounts
+    if not accounts.configured:
+        raise PmieError(
+            ErrorType.INTERNAL_ERROR, "Accounts are not configured.", status=503
+        )
+
+    try:
+        code = accounts.get_referral_code(user.id)
+        counts = accounts.referral_counts(user.id)
+    except AccountsError as exc:
+        raise PmieError(
+            ErrorType.INTERNAL_ERROR, "Could not load your referrals.", status=503
+        ) from exc
+
+    return ReferralSummary(
+        code=code,
+        referred_count=counts.referred_count,
+        converted_count=counts.converted_count,
+        analyses_granted=bonus_analyses_for(counts.converted_count),
+        next_reward_at=next_reward_at(counts.converted_count),
+    )
 
 
 @router.get(

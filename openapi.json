@@ -1480,6 +1480,7 @@
     },
     "/v1/billing/intent": {
       "post": {
+        "description": "A click on the quota wall, not a payment. No Stripe, no money moves \u2014\n\nsee PayIntentRequest. profile_id comes only from the verified token.",
         "operationId": "record_pay_intent_v1_billing_intent_post",
         "requestBody": {
           "content": {
@@ -1495,6 +1496,17 @@
           "204": {
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1505,8 +1517,16 @@
             },
             "description": "Validation Error"
           },
-          "501": {
-            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
         "summary": "Record willingness to pay at the price shown"
@@ -1562,11 +1582,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ProblemResponse"
                 }
-              }
+              },
+              "application/problem+json": {}
             },
-            "description": "Validation Error"
+            "description": "Malformed event name or properties"
           },
           "503": {
             "content": {
@@ -1674,7 +1695,7 @@
     },
     "/v1/me": {
       "get": {
-        "description": "The caller's profile, interests and usage.\n\nOne call so the client can render the whole authenticated shell \u2014 header,\nusage indicator, onboarding state \u2014 without a waterfall of requests.",
+        "description": "The caller's profile, interests and usage.\n\nOne call so the client can render the whole authenticated shell \u2014 header,\nusage indicator, onboarding state \u2014 without a waterfall of requests.\n\nPlain `def`, matching `join_waitlist`'s fix: every call here is a\nblocking Supabase request (up to ~6 of them, once referral attribution\nand conversion are included), and an `async def` with no `await` runs\nthem all inline on the single event loop this process uses.",
         "operationId": "me_v1_me_get",
         "responses": {
           "200": {
@@ -1951,8 +1972,38 @@
             },
             "description": "Successful Response"
           },
-          "501": {
-            "description": "Not implemented yet \u2014 the contract is frozen, the logic is not."
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not signed in, or the token failed verification"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Signed in but not invited to the alpha"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "A dependency is unavailable"
           }
         },
         "summary": "This user's referral code and its standing"

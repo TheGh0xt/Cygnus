@@ -1,4 +1,5 @@
-"""Growth endpoints: pre-signup capture (B.15) and product telemetry (B.19).
+"""Growth endpoints: pre-signup capture (B.15), product telemetry (B.19) and
+the intent wall (B.10).
 
 Two routers, deliberately. `router` carries no `get_current_user` dependency
 — a visitor reaching the landing page has no account yet — so `/waitlist`
@@ -6,8 +7,9 @@ must instead be listed in `access.PUBLIC_ROUTES` explicitly, or
 `test_every_public_route_is_closed_unless_allowlisted` fails; see access.py's
 docstring for why that's the only way to opt out. `authenticated_router`
 carries the dependency the ordinary way (routes.py/sharing_routes.py's
-pattern): `/events` records product telemetry, which only makes sense
-attributed to a signed-in caller.
+pattern): `/events` records product telemetry and `/billing/intent` records a
+click on the quota wall, and neither makes sense from a caller who isn't
+signed in.
 """
 
 from __future__ import annotations
@@ -17,11 +19,17 @@ import re
 from fastapi import APIRouter, Depends, Request
 
 from .access import get_current_user
-from .accounts import AccountsError
+from .accounts import PRO_MONTHLY_PRICE_USD, AccountsError
 from .auth import CurrentUser
 from .errors import ErrorType, PmieError
 from .growth import GrowthError
-from .models import ProblemResponse, UserEventRequest, WaitlistRequest, WaitlistResponse
+from .models import (
+    PayIntentRequest,
+    ProblemResponse,
+    UserEventRequest,
+    WaitlistRequest,
+    WaitlistResponse,
+)
 
 PROBLEM = {
     "model": ProblemResponse,
@@ -131,6 +139,7 @@ def join_waitlist(body: WaitlistRequest, request: Request) -> WaitlistResponse:
             "description": "Not signed in, or the token failed verification",
             **PROBLEM,
         },
+        422: {"description": "Malformed event name or properties", **PROBLEM},
         503: {"description": "A dependency is unavailable", **PROBLEM},
     },
 )
@@ -181,4 +190,43 @@ def record_event(
     except GrowthError as exc:
         raise PmieError(
             ErrorType.INTERNAL_ERROR, "Could not record that event.", status=503
+        ) from exc
+
+
+@authenticated_router.post(
+    "/billing/intent",
+    status_code=204,
+    summary="Record willingness to pay at the price shown",
+    responses={
+        401: {
+            "description": "Not signed in, or the token failed verification",
+            **PROBLEM,
+        },
+        503: {"description": "A dependency is unavailable", **PROBLEM},
+    },
+)
+# Plain `def`, matching join_waitlist's fix above: the only I/O is a blocking
+# Supabase call.
+def record_pay_intent(
+    body: PayIntentRequest,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+) -> None:
+    """A click on the quota wall, not a payment. No Stripe, no money moves —
+
+    see PayIntentRequest. profile_id comes only from the verified token.
+    """
+    growth = request.app.state.growth
+    if not growth.configured:
+        raise PmieError(
+            ErrorType.INTERNAL_ERROR, "Event tracking is not configured.", status=503
+        )
+
+    try:
+        growth.record_pay_intent(
+            user.id, body.price_shown_usd, body.plan, PRO_MONTHLY_PRICE_USD
+        )
+    except GrowthError as exc:
+        raise PmieError(
+            ErrorType.INTERNAL_ERROR, "Could not record that.", status=503
         ) from exc
