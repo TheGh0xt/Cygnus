@@ -16,14 +16,20 @@ with its real request and response models.
 implement it, and delete it from here. This file should shrink to nothing. If
 it stops shrinking, the freeze has become a backlog.
 
-Owners, by ROADMAP §0b task:
-    B.10  referrals, quota, intent  → accounts
-
 Already retired: B.15 (waitlist) — see growth.py / growth_routes.py.
 B.17 (moving-markets feed) — see discovery.py / discovery_routes.py.
 B.7 (TOTP) — see mfa.py / mfa_routes.py.
 B.19 (UI-mode telemetry) — see growth.py / growth_routes.py.
 B.11 (explanation calibration) — see evaluation/calibration.py / calibration_routes.py.
+B.10 (referrals, quota, intent) — see accounts.py / routes.py (referrals,
+quota) and growth.py / growth_routes.py (billing intent). Both routes had
+real implementations from the start; this file just never dropped the
+now-shadowed stub definitions, so every request to them matched the stub
+first and the real handler was unreachable.
+
+No stub remains as of this writing — the router below is empty and kept only
+so app.py's `include_router(contract_stub_router)` has nothing to break when
+the next stub is added.
 """
 
 from __future__ import annotations
@@ -32,18 +38,12 @@ from fastapi import APIRouter, Depends
 
 from .access import get_current_user
 from .errors import ErrorType, PmieError
-from .models import (
-    PayIntentRequest,
-    ReferralSummary,
-)
 
 # Same fail-closed default as routes.py and sharing_routes.py: every stub
-# below will be a real, identity-scoped endpoint once it's built (mfa,
-# referrals, billing intent and events are all per-user; see each task's
-# acceptance criteria), so it inherits get_current_user now rather than
-# gaining it as an afterthought when the 501 is replaced with real logic.
-# The genuinely public stubs (waitlist, calibration) opted out via
-# access.PUBLIC_ROUTES, the only way to do so — both since retired.
+# below will be a real, identity-scoped endpoint once it's built, so it
+# inherits get_current_user now rather than gaining it as an afterthought
+# when the 501 is replaced with real logic. A genuinely public stub opts out
+# via access.PUBLIC_ROUTES, the only way to do so.
 router = APIRouter(prefix="/v1", dependencies=[Depends(get_current_user)])
 
 _RESPONSES: dict[int | str, dict] = {
@@ -60,28 +60,3 @@ def _stub(task: str) -> None:
         f"This endpoint's contract is frozen but its logic is not built yet ({task}).",
         501,
     )
-
-
-# ── B.10 — referrals and the intent wall ─────────────────────────────────────
-
-
-@router.get(
-    "/me/referrals",
-    response_model=ReferralSummary,
-    responses=_RESPONSES,
-    summary="This user's referral code and its standing",
-)
-async def referrals() -> ReferralSummary:
-    _stub("B.10")
-
-
-@router.post(
-    "/billing/intent",
-    status_code=204,
-    responses=_RESPONSES,
-    summary="Record willingness to pay at the price shown",
-)
-async def record_pay_intent(_body: PayIntentRequest) -> None:
-    # No money moves during beta. This records that someone who had already
-    # used the product wanted more of it at a stated price.
-    _stub("B.10")

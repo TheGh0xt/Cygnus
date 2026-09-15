@@ -20,15 +20,7 @@ from src.api.app import create_app
 # Every frozen route, with the ROADMAP §0b task that retires it. Deleting a row
 # here is how a stub graduates — and doing so without implementing the route
 # makes test_no_stub_is_silently_dropped fail.
-FROZEN: list[tuple[str, str, dict | None, str]] = [
-    ("get", "/v1/me/referrals", None, "B.10"),
-    (
-        "post",
-        "/v1/billing/intent",
-        {"price_shown_usd": 19.0, "plan": "pro-monthly"},
-        "B.10",
-    ),
-]
+FROZEN: list[tuple[str, str, dict | None, str]] = []
 
 
 @pytest.fixture
