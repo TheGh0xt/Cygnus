@@ -43,6 +43,13 @@ class StoredReport:
     created_at: datetime
     evaluated_at: datetime | None
     outcome: str | None  # "CONFIRMED" | "REVERSED" | None
+    # The analyst's original confidence claim, fixed at save_report and never
+    # touched by an evaluation — unlike report.confidence_score, which the
+    # T+48h adjustment overwrites. Calibration (B.11) bins on this, not on
+    # confidence_score: binning by a post-hoc-adjusted value would measure
+    # how much the score moved, not how well-calibrated the original claim
+    # was.
+    stated_confidence: float
 
 
 @dataclass
@@ -86,7 +93,26 @@ class SqliteMemoryStore:
         self._lock = threading.Lock()
         with self._lock:
             self._conn.executescript(_SCHEMA_PATH.read_text())
+            self._migrate_stated_confidence_score()
             self._conn.commit()
+
+    def _migrate_stated_confidence_score(self) -> None:
+        """Add stated_confidence_score to a DB created before B.11.
+
+        schema.sql's CREATE TABLE IF NOT EXISTS is a no-op against a table
+        that already exists, so an on-disk dev DB from before this column
+        existed would otherwise never gain it — the same
+        PostgREST-rejects-an-unknown-column gap the Postgres migration
+        guards against in production, just on SQLite's dev/test path.
+        """
+        columns = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(analysis_reports)")
+        }
+        if "stated_confidence_score" not in columns:
+            self._conn.execute(
+                "ALTER TABLE analysis_reports ADD COLUMN stated_confidence_score REAL"
+            )
 
     def save_report(
         self,
@@ -101,13 +127,14 @@ class SqliteMemoryStore:
                 """
                 INSERT INTO analysis_reports
                     (market_id, market_slug, report_json, confidence_score,
-                     price_at_report, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                     stated_confidence_score, price_at_report, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     report.market_id,
                     market_slug,
                     report.model_dump_json(),
+                    report.confidence_score,
                     report.confidence_score,
                     price_at_report,
                     created.isoformat(),
@@ -318,8 +345,47 @@ class SqliteMemoryStore:
             for row in rows
         ]
 
+    def get_scored_reports(self) -> list[StoredReport]:
+        """Every report with a canonical (48h) outcome recorded.
+
+        The read behind B.11's calibration curve: only a report that has
+        actually been scored against what the market did 48 hours later
+        belongs in a reliability calculation.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM analysis_reports WHERE outcome IS NOT NULL"
+            ).fetchall()
+        return [self._to_stored(r) for r in rows]
+
+    def get_scored_confidence_outcomes(self) -> list[tuple[float, str]]:
+        """Narrow read behind the public calibration curve (B.11 review).
+
+        `get_scored_reports` decodes the full stored report — fine for the
+        evaluation worker, wasteful for an unauthenticated route that only
+        ever needs two numbers per row.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT stated_confidence_score, confidence_score, outcome "
+                "FROM analysis_reports WHERE outcome IS NOT NULL"
+            ).fetchall()
+        return [
+            (
+                row["stated_confidence_score"]
+                if row["stated_confidence_score"] is not None
+                else row["confidence_score"],
+                row["outcome"],
+            )
+            for row in rows
+        ]
+
     @staticmethod
     def _to_stored(row: sqlite3.Row) -> StoredReport:
+        # Rows written before stated_confidence_score existed have it NULL;
+        # confidence_score is the best available stand-in there, since an
+        # unevaluated row's confidence_score *is* still the stated value.
+        stated = row["stated_confidence_score"]
         return StoredReport(
             id=row["id"],
             market_id=row["market_id"],
@@ -333,4 +399,7 @@ class SqliteMemoryStore:
                 else None
             ),
             outcome=row["outcome"],
+            stated_confidence=(
+                stated if stated is not None else row["confidence_score"]
+            ),
         )

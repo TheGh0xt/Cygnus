@@ -18,12 +18,12 @@ it stops shrinking, the freeze has become a backlog.
 
 Owners, by ROADMAP §0b task:
     B.10  referrals, quota, intent  → accounts
-    B.11  explanation calibration   → evaluation
 
 Already retired: B.15 (waitlist) — see growth.py / growth_routes.py.
 B.17 (moving-markets feed) — see discovery.py / discovery_routes.py.
 B.7 (TOTP) — see mfa.py / mfa_routes.py.
 B.19 (UI-mode telemetry) — see growth.py / growth_routes.py.
+B.11 (explanation calibration) — see evaluation/calibration.py / calibration_routes.py.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ from fastapi import APIRouter, Depends
 from .access import get_current_user
 from .errors import ErrorType, PmieError
 from .models import (
-    CalibrationResponse,
     PayIntentRequest,
     ReferralSummary,
 )
@@ -43,8 +42,8 @@ from .models import (
 # referrals, billing intent and events are all per-user; see each task's
 # acceptance criteria), so it inherits get_current_user now rather than
 # gaining it as an afterthought when the 501 is replaced with real logic.
-# The two genuinely public stubs (waitlist — since retired — and
-# calibration) opt out via access.PUBLIC_ROUTES, the only way to do so.
+# The genuinely public stubs (waitlist, calibration) opted out via
+# access.PUBLIC_ROUTES, the only way to do so — both since retired.
 router = APIRouter(prefix="/v1", dependencies=[Depends(get_current_user)])
 
 _RESPONSES: dict[int | str, dict] = {
@@ -86,19 +85,3 @@ async def record_pay_intent(_body: PayIntentRequest) -> None:
     # No money moves during beta. This records that someone who had already
     # used the product wanted more of it at a stated price.
     _stub("B.10")
-
-
-# ── B.11 — explanation calibration ───────────────────────────────────────────
-
-
-@router.get(
-    "/calibration",
-    response_model=CalibrationResponse,
-    responses=_RESPONSES,
-    summary="Reliability of PMIE's own confidence scores",
-)
-async def calibration() -> CalibrationResponse:
-    # Explanation calibration, not a forecast record: "when PMIE says 0.7, is
-    # it right about 70% of the time?" It scores no prediction of a market
-    # outcome, because PMIE makes none.
-    _stub("B.11")

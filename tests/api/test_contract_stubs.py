@@ -28,7 +28,6 @@ FROZEN: list[tuple[str, str, dict | None, str]] = [
         {"price_shown_usd": 19.0, "plan": "pro-monthly"},
         "B.10",
     ),
-    ("get", "/v1/calibration", None, "B.11"),
 ]
 
 
