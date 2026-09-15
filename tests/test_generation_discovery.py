@@ -9,9 +9,12 @@ import json
 
 import pytest
 
+from src.generation import discovery as discovery_module
 from src.generation.discovery import (
     DiscoveryError,
     SagittariusDiscovery,
+    _count_leaves,
+    _unwrap_exception_group,
     parse_moving_markets,
 )
 
@@ -126,6 +129,125 @@ class TestFailuresAreLoud:
 
         with pytest.raises(DiscoveryError):
             parse_moving_markets(CallToolResult(content=[], isError=False))
+
+
+class TestUnwrapExceptionGroup:
+    """F5: production generation has failed on every one of 39 runs since
+    09-07 with the same useless message — "unhandled errors in a TaskGroup
+    (1 sub-exception)" — because anyio's TaskGroup (used internally by
+    ClientSession/streamable_http_client) wraps every failure in an
+    ExceptionGroup whose own str() hides the real cause."""
+
+    def test_plain_exception_is_returned_unchanged(self):
+        exc = ConnectionRefusedError("refused")
+        assert _unwrap_exception_group(exc) is exc
+
+    def test_unwraps_a_single_level_group(self):
+        real = ConnectionRefusedError("[Errno 61] Connection refused")
+        group = ExceptionGroup("unhandled errors in a TaskGroup", [real])
+        assert _unwrap_exception_group(group) is real
+
+    def test_unwraps_nested_groups(self):
+        real = TimeoutError("timed out")
+        inner = ExceptionGroup("inner", [real])
+        outer = ExceptionGroup("unhandled errors in a TaskGroup", [inner])
+        assert _unwrap_exception_group(outer) is real
+
+
+class TestCountLeaves:
+    """Backs the optional "(+N more)" suffix — a group with several failed
+    tasks must not silently drop every leaf but the first."""
+
+    def test_a_plain_exception_counts_as_one(self):
+        assert _count_leaves(ValueError("x")) == 1
+
+    def test_flat_group_counts_every_leaf(self):
+        group = ExceptionGroup("g", [ValueError("a"), TypeError("b")])
+        assert _count_leaves(group) == 2
+
+    def test_nested_groups_count_recursively(self):
+        inner = ExceptionGroup("inner", [ValueError("a"), TypeError("b")])
+        outer = ExceptionGroup("outer", [inner, KeyError("c")])
+        assert _count_leaves(outer) == 3
+
+
+class _RaisingAsyncCM:
+    """A stand-in for mcp_http_client that raises on entry, so moving_markets
+    exercises its real except-and-wrap path without a live MCP session."""
+
+    def __init__(self, exc: BaseException):
+        self._exc = exc
+
+    async def __aenter__(self):
+        raise self._exc
+
+    async def __aexit__(self, *args):
+        return False
+
+
+class TestDiscoveryErrorUnwrapsExceptionGroups:
+    async def test_reports_the_real_cause_not_the_taskgroup_wrapper(self, monkeypatch):
+        real = ConnectionRefusedError("[Errno 61] Connection refused")
+        group = ExceptionGroup("unhandled errors in a TaskGroup", [real])
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(group),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError) as exc_info:
+            await discovery.moving_markets()
+
+        message = str(exc_info.value)
+        assert "Connection refused" in message
+        assert "unhandled errors in a TaskGroup" not in message
+
+    async def test_a_plain_exception_still_reports_its_own_message(self, monkeypatch):
+        # Not every failure is wrapped in a TaskGroup — a plain exception
+        # (e.g. a DNS failure raised directly) must pass through unchanged.
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(OSError("nodename nor servname")),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError, match="nodename nor servname"):
+            await discovery.moving_markets()
+
+    async def test_empty_message_leaf_still_names_its_type(self, monkeypatch):
+        # httpx's ReadTimeout/ConnectTimeout and anyio's ClosedResourceError/
+        # EndOfStream commonly stringify to "" — without the type name the
+        # cron log would read "...: " with nothing after it, no better off
+        # than the TaskGroup wrapper text this PR replaces.
+        group = ExceptionGroup("unhandled errors in a TaskGroup", [TimeoutError()])
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(group),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError, match="TimeoutError"):
+            await discovery.moving_markets()
+
+    async def test_several_leaves_reports_how_many_more(self, monkeypatch):
+        # A TaskGroup can fail more than one task at once; dropping every
+        # leaf but the first without a trace would hide that.
+        group = ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [ConnectionRefusedError("refused"), TimeoutError("timed out")],
+        )
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(group),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError, match=r"\(\+1 more\)"):
+            await discovery.moving_markets()
 
 
 class TestAuth:
