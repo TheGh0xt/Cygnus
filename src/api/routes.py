@@ -5,12 +5,14 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from .access import get_current_user
 from .accounts import (
-    FREE_MONTHLY_ANALYSES,
+    PRO_MONTHLY_PRICE_USD,
     AccountsError,
+    ReferralCounts,
     bonus_analyses_for,
     effective_allowance,
     next_reward_at,
@@ -106,18 +108,19 @@ async def create_analysis(
     A full analysis takes 60-120 seconds across four stages, so the work
     happens in the background and progress arrives over the SSE endpoint.
     """
-    require_invited(request, user)
+    profile = require_invited(request, user)
 
     # After the invite check (so an uninvited caller hears that instead) and
     # before the rate limiter (running out of monthly quota is a more
     # fundamental block than a burst limit). Skipped when accounts isn't
     # configured — require_invited already 503s in that case unless auth is
     # disabled, so this only ever runs unenforced in the local dev bypass.
+    # Also skipped for grandfathered accounts: exempt from the quota entirely.
     accounts = request.app.state.accounts
-    if accounts.configured:
+    if accounts.configured and not profile.is_grandfathered:
         try:
-            used = accounts.monthly_usage(user.id)
-            counts = accounts.referral_counts(user.id)
+            used = await run_in_threadpool(accounts.monthly_usage, user.id)
+            counts = await run_in_threadpool(accounts.referral_counts, user.id)
         except AccountsError as exc:
             raise PmieError(
                 ErrorType.INTERNAL_ERROR, "Could not verify your usage.", status=503
@@ -127,8 +130,9 @@ async def create_analysis(
         if used >= allowance:
             raise PmieError(
                 ErrorType.QUOTA_EXCEEDED,
-                f"You've used all {allowance} analyses for this month. "
-                "It resets on the 1st.",
+                f"You've used all {allowance} analyses for this month. Upgrade "
+                f"to Pro (${PRO_MONTHLY_PRICE_USD:.0f}/month) for more, or wait "
+                "until it resets on the 1st.",
                 status=403,
             )
 
@@ -332,6 +336,11 @@ async def me(request: Request, user: CurrentUser = Depends(get_current_user)) ->
         profile = accounts.get_profile(user.id)
         interests = accounts.get_interests(user.id) if profile else []
         used = accounts.monthly_usage(user.id) if profile else 0
+        counts = (
+            accounts.referral_counts(user.id)
+            if profile
+            else ReferralCounts(referred_count=0, converted_count=0)
+        )
     except AccountsError as exc:
         raise PmieError(
             ErrorType.INTERNAL_ERROR, "Could not load your account.", status=503
@@ -341,6 +350,11 @@ async def me(request: Request, user: CurrentUser = Depends(get_current_user)) ->
         raise PmieError(
             ErrorType.INVALID_REQUEST, "No account found for this session.", status=401
         )
+
+    # Best-effort, same posture as record_usage: neither call may fail /me.
+    accounts.sync_referral_attribution(profile, user.email)
+    if user.email_verified:
+        accounts.mark_referral_converted(profile.id)
 
     return {
         "id": profile.id,
@@ -352,7 +366,8 @@ async def me(request: Request, user: CurrentUser = Depends(get_current_user)) ->
         "interests": interests,
         "usage": UsageSummary(
             analyses_this_month=used,
-            free_monthly_allowance=FREE_MONTHLY_ANALYSES,
+            free_monthly_allowance=effective_allowance(counts.converted_count),
+            enforced=not profile.is_grandfathered,
         ),
         "ui_mode": profile.ui_mode,
     }
@@ -364,7 +379,7 @@ async def me(request: Request, user: CurrentUser = Depends(get_current_user)) ->
     summary="This user's referral code and its standing",
     responses=_AUTH_ERRORS,
 )
-async def referrals(
+def referrals(
     request: Request, user: CurrentUser = Depends(get_current_user)
 ) -> ReferralSummary:
     accounts = request.app.state.accounts
