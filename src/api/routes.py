@@ -322,6 +322,7 @@ async def me(request: Request, user: CurrentUser = Depends(get_current_user)) ->
             analyses_this_month=used,
             free_monthly_allowance=FREE_MONTHLY_ANALYSES,
         ),
+        "ui_mode": profile.ui_mode,
     }
 
 

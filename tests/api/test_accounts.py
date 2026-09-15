@@ -130,6 +130,73 @@ class TestRecordUsage:
         Accounts.record_usage(accounts, "u1", "a1", "completed")
 
 
+class TestProfileUiMode:
+    def test_get_profile_reads_ui_mode(self):
+        accounts = FakeAccounts()
+
+        class R:
+            @staticmethod
+            def json():
+                return [
+                    {
+                        "id": "u1",
+                        "display_name": None,
+                        "is_invited": True,
+                        "is_grandfathered": False,
+                        "onboarding_completed_at": None,
+                        "ui_mode": "TERMINAL",
+                    }
+                ]
+
+        accounts._request = lambda method, path, **kwargs: R()  # type: ignore[method-assign]
+        profile = Accounts.get_profile(accounts, "u1")
+
+        assert profile.ui_mode == "TERMINAL"
+
+    def test_get_profile_ui_mode_defaults_to_none(self):
+        accounts = FakeAccounts()
+
+        class R:
+            @staticmethod
+            def json():
+                return [
+                    {
+                        "id": "u1",
+                        "display_name": None,
+                        "is_invited": True,
+                        "is_grandfathered": False,
+                        "onboarding_completed_at": None,
+                    }
+                ]
+
+        accounts._request = lambda method, path, **kwargs: R()  # type: ignore[method-assign]
+        profile = Accounts.get_profile(accounts, "u1")
+
+        assert profile.ui_mode is None
+
+    def test_set_ui_mode_patches_the_profile(self):
+        accounts = FakeAccounts()
+        calls = []
+
+        def fake_request(method, path, **kwargs):
+            calls.append((method, path, kwargs))
+
+            class R:
+                @staticmethod
+                def json():
+                    return {}
+
+            return R()
+
+        accounts._request = fake_request  # type: ignore[method-assign]
+        Accounts.set_ui_mode(accounts, "u1", "CONVENTIONAL")
+
+        method, path, kwargs = calls[0]
+        assert (method, path) == ("PATCH", "/profiles")
+        assert kwargs["params"] == {"id": "eq.u1"}
+        assert kwargs["json"]["ui_mode"] == "CONVENTIONAL"
+
+
 class TestConfiguration:
     def test_unconfigured_accounts_report_it(self):
         accounts = Accounts(base_url="", service_key="")
