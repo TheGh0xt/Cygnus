@@ -52,11 +52,20 @@ _REFERRAL_CODE_LENGTH = 8
 def _escape_ilike(value: str) -> str:
     """Escape PostgREST's `ilike` wildcard (`*`) so a literal one in the
 
-    input can't turn an exact match into a pattern match. Backslash is
-    escaped first so a value that already contains one doesn't get
-    double-escaped by the `*` substitution below.
+    input can't turn an exact match into a pattern match. PostgREST rewrites
+    `*` to SQL `%` and passes the rest of the value straight to LIKE, where a
+    literal `%` or `_` are still wildcards underneath — and `_` is common in
+    real emails, so an unescaped one (e.g. jane_doe@example.com) would also
+    match janeXdoe@example.com and could credit the wrong referrer. Backslash
+    is escaped first so a value that already contains one doesn't get
+    double-escaped by the substitutions below.
     """
-    return value.replace("\\", "\\\\").replace("*", "\\*")
+    return (
+        value.replace("\\", "\\\\")
+        .replace("*", "\\*")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
 
 
 def bonus_analyses_for(converted_count: int) -> int:

@@ -639,6 +639,38 @@ class TestSyncReferralAttribution:
 
         assert captured["email_param"] == "ilike.we\\*rd@example.com"
 
+    def test_escapes_sql_like_wildcards_in_the_email(self):
+        """PostgREST rewrites '*' to SQL '%' and passes the rest of the value
+
+        straight to LIKE, where a literal '%' or '_' are still wildcards —
+        and underscores are common in real emails. Unescaped, jane_doe@...
+        would also match janeXdoe@..., crediting the wrong referrer.
+        """
+        accounts = FakeAccounts()
+        profile = _profile()
+
+        class R:
+            def __init__(self, rows):
+                self.status_code = 200
+                self._rows = rows
+
+            def json(self):
+                return self._rows
+
+        captured = {}
+
+        def fake(method, path, ok_extra=(), **kwargs):
+            if path == "/waitlist":
+                captured["email_param"] = kwargs["params"]["email"]
+                return R([])
+            raise AssertionError(f"unexpected write: {method} {path}")
+
+        accounts._request = fake  # type: ignore[method-assign]
+        accounts._request_allow = fake  # type: ignore[method-assign]
+        Accounts.sync_referral_attribution(accounts, profile, "jane_doe@example.com")
+
+        assert captured["email_param"] == "ilike.jane\\_doe@example.com"
+
     def test_ignores_self_referral(self):
         accounts = FakeAccounts()
         profile = _profile(id="same-user")
