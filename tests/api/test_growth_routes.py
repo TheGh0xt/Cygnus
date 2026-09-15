@@ -17,13 +17,14 @@ def client(monkeypatch, tmp_path):
 
 
 class FakeGrowth:
-    def __init__(self, result=None, error=None, event_error=None):
+    def __init__(self, result=None, error=None, event_error=None, order=None):
         self.result = result or WaitlistJoinResult(already_registered=False)
         self.error = error
         self.event_error = event_error
         self.configured = True
         self.calls: list[tuple[str, str | None]] = []
         self.event_calls: list[tuple] = []
+        self._order = order
 
     def join_waitlist(self, email, referral_code):
         self.calls.append((email, referral_code))
@@ -33,18 +34,23 @@ class FakeGrowth:
 
     def record_event(self, profile_id, name, ui_mode, properties):
         self.event_calls.append((profile_id, name, ui_mode, properties))
+        if self._order is not None:
+            self._order.append("record_event")
         if self.event_error:
             raise self.event_error
 
 
 class FakeAccountsForEvents:
-    def __init__(self, error=None):
+    def __init__(self, error=None, order=None):
         self.configured = True
         self.error = error
         self.calls: list[tuple[str, str]] = []
+        self._order = order
 
     def set_ui_mode(self, profile_id, ui_mode):
         self.calls.append((profile_id, ui_mode))
+        if self._order is not None:
+            self._order.append("set_ui_mode")
         if self.error:
             raise self.error
 
@@ -287,6 +293,41 @@ class TestEventsRoute:
         )
 
         assert fake_accounts.calls == []
+
+    def test_ui_mode_switched_without_a_mode_is_rejected(self, client):
+        """Follow-up from the Cygnus#32 review: a switch event with no mode
+
+        chosen was previously accepted silently and updated nothing.
+        """
+        client.app.state.jwks = FakeJwks()
+        client.app.state.growth = FakeGrowth()
+        client.app.state.accounts = FakeAccountsForEvents()
+
+        response = client.post(
+            "/v1/events", headers=_auth("user-1"), json={"name": "ui_mode_switched"}
+        )
+        assert response.status_code == 422
+
+    def test_profile_is_updated_before_the_event_is_logged(self, client):
+        """Follow-up from the Cygnus#32 review: the profile PATCH is
+
+        idempotent but event logging is not, so on a retry after a failure
+        the idempotent write must happen first — otherwise a failed PATCH
+        after a successful log means a retry double-logs the event.
+        """
+        client.app.state.jwks = FakeJwks()
+        order: list[str] = []
+        client.app.state.growth = FakeGrowth(order=order)
+        client.app.state.accounts = FakeAccountsForEvents(order=order)
+
+        response = client.post(
+            "/v1/events",
+            headers=_auth("user-1"),
+            json={"name": "ui_mode_switched", "ui_mode": "TERMINAL"},
+        )
+
+        assert response.status_code == 204
+        assert order == ["set_ui_mode", "record_event"]
 
     def test_profile_update_failure_is_503(self, client):
         client.app.state.jwks = FakeJwks()

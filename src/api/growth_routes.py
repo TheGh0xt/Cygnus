@@ -57,6 +57,12 @@ def _validate_event(body: UserEventRequest) -> None:
             "name must be lowercase snake_case, at most 64 characters.",
             status=422,
         )
+    if body.name == "ui_mode_switched" and body.ui_mode is None:
+        raise PmieError(
+            ErrorType.INVALID_REQUEST,
+            "ui_mode_switched requires ui_mode.",
+            status=422,
+        )
     if len(body.properties) > _MAX_PROPERTIES:
         raise PmieError(
             ErrorType.INVALID_REQUEST,
@@ -144,21 +150,12 @@ def record_event(
             ErrorType.INTERNAL_ERROR, "Event tracking is not configured.", status=503
         )
 
-    try:
-        growth.record_event(
-            user.id,
-            body.name,
-            body.ui_mode.value if body.ui_mode else None,
-            body.properties,
-        )
-    except GrowthError as exc:
-        raise PmieError(
-            ErrorType.INTERNAL_ERROR, "Could not record that event.", status=503
-        ) from exc
-
-    # The actual point of Profile.ui_mode/MeResponse.ui_mode (Cygnus#32
-    # review): a mode switch must persist on the profile, not just get
-    # logged, so it survives a new device or session.
+    # The profile PATCH (idempotent — it just sets ui_mode) runs before the
+    # event log (not idempotent — each call appends a row), so a retry after
+    # a failure here re-applies the same state instead of double-logging the
+    # event. This is also the actual point of Profile.ui_mode/MeResponse.ui_mode
+    # (Cygnus#32 review): a mode switch must persist on the profile, not just
+    # get logged, so it survives a new device or session.
     if body.name == "ui_mode_switched" and body.ui_mode is not None:
         accounts = request.app.state.accounts
         if not accounts.configured:
@@ -173,3 +170,15 @@ def record_event(
                 "Could not update your preference.",
                 status=503,
             ) from exc
+
+    try:
+        growth.record_event(
+            user.id,
+            body.name,
+            body.ui_mode.value if body.ui_mode else None,
+            body.properties,
+        )
+    except GrowthError as exc:
+        raise PmieError(
+            ErrorType.INTERNAL_ERROR, "Could not record that event.", status=503
+        ) from exc
