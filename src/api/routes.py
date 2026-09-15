@@ -8,7 +8,13 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from .access import get_current_user
-from .accounts import FREE_MONTHLY_ANALYSES, AccountsError
+from .accounts import (
+    FREE_MONTHLY_ANALYSES,
+    AccountsError,
+    bonus_analyses_for,
+    effective_allowance,
+    next_reward_at,
+)
 from .auth import CurrentUser
 from .config import describe_supabase_config
 from .dependencies import require_invited
@@ -25,6 +31,7 @@ from .models import (
     MeResponse,
     ProblemResponse,
     ReadyResponse,
+    ReferralSummary,
     UsageSummary,
     extract_slug,
 )
@@ -101,9 +108,34 @@ async def create_analysis(
     """
     require_invited(request, user)
 
-    # After the invite check, so an uninvited caller is told that rather than
-    # being rate limited, and before any work starts — this endpoint is the
-    # expensive one and the limit exists to protect the model budget.
+    # After the invite check (so an uninvited caller hears that instead) and
+    # before the rate limiter (running out of monthly quota is a more
+    # fundamental block than a burst limit). Skipped when accounts isn't
+    # configured — require_invited already 503s in that case unless auth is
+    # disabled, so this only ever runs unenforced in the local dev bypass.
+    accounts = request.app.state.accounts
+    if accounts.configured:
+        try:
+            used = accounts.monthly_usage(user.id)
+            counts = accounts.referral_counts(user.id)
+        except AccountsError as exc:
+            raise PmieError(
+                ErrorType.INTERNAL_ERROR, "Could not verify your usage.", status=503
+            ) from exc
+
+        allowance = effective_allowance(counts.converted_count)
+        if used >= allowance:
+            raise PmieError(
+                ErrorType.QUOTA_EXCEEDED,
+                f"You've used all {allowance} analyses for this month. "
+                "It resets on the 1st.",
+                status=403,
+            )
+
+    # After the invite and quota checks, so an uninvited or over-quota caller
+    # is told that rather than being rate limited, and before any work starts
+    # — this endpoint is the expensive one and the limit exists to protect
+    # the model budget.
     try:
         request.app.state.limiter.check(user.id)
     except RateLimitExceeded as exc:
@@ -324,6 +356,38 @@ async def me(request: Request, user: CurrentUser = Depends(get_current_user)) ->
         ),
         "ui_mode": profile.ui_mode,
     }
+
+
+@router.get(
+    "/me/referrals",
+    response_model=ReferralSummary,
+    summary="This user's referral code and its standing",
+    responses=_AUTH_ERRORS,
+)
+async def referrals(
+    request: Request, user: CurrentUser = Depends(get_current_user)
+) -> ReferralSummary:
+    accounts = request.app.state.accounts
+    if not accounts.configured:
+        raise PmieError(
+            ErrorType.INTERNAL_ERROR, "Accounts are not configured.", status=503
+        )
+
+    try:
+        code = accounts.get_referral_code(user.id)
+        counts = accounts.referral_counts(user.id)
+    except AccountsError as exc:
+        raise PmieError(
+            ErrorType.INTERNAL_ERROR, "Could not load your referrals.", status=503
+        ) from exc
+
+    return ReferralSummary(
+        code=code,
+        referred_count=counts.referred_count,
+        converted_count=counts.converted_count,
+        analyses_granted=bonus_analyses_for(counts.converted_count),
+        next_reward_at=next_reward_at(counts.converted_count),
+    )
 
 
 @router.get(

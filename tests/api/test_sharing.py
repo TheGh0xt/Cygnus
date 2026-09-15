@@ -15,7 +15,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.accounts import Profile
+from src.api.accounts import Profile, ReferralCounts
 from src.api.app import create_app
 from src.api.auth import CurrentUser
 from src.api.pipeline import AnalysisPipeline
@@ -103,6 +103,14 @@ class FakeAccounts:
 
     def record_usage(self, *args, **kwargs) -> None:
         """Usage accounting is not what these tests are about."""
+
+    def monthly_usage(self, profile_id: str) -> int:
+        """Quota enforcement (B.10) is not what these tests are about."""
+        return 0
+
+    def referral_counts(self, profile_id: str) -> ReferralCounts:
+        """No referral bonus in play here either."""
+        return ReferralCounts(referred_count=0, converted_count=0)
 
 
 def _client(tmp_path):

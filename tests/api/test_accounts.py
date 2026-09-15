@@ -1,11 +1,18 @@
+from datetime import UTC, datetime
+
 import pytest
 
 from src.api.accounts import (
     FREE_MONTHLY_ANALYSES,
     MAX_INTERESTS,
     MIN_INTERESTS,
+    REFERRAL_BONUS_ANALYSES,
+    REFERRAL_CONVERSIONS_PER_BONUS,
     Accounts,
     AccountsError,
+    bonus_analyses_for,
+    effective_allowance,
+    next_reward_at,
 )
 
 
@@ -206,3 +213,236 @@ class TestConfiguration:
         accounts = Accounts(base_url="", service_key="")
         with pytest.raises(AccountsError, match="not configured"):
             accounts.get_profile("u1")
+
+
+class TestMonthlyUsage:
+    def test_filters_to_the_current_calendar_month(self):
+        """monthly_usage's name and docstring both promise 'this month', but
+
+        nothing filtered by date at all until B.10 wired quota enforcement
+        to it and this gap would have meant every user's lifetime completed
+        count, never resetting.
+        """
+        accounts = FakeAccounts()
+        captured = {}
+
+        class R:
+            headers = {"content-range": "0-0/3"}
+
+            @staticmethod
+            def json():
+                return []
+
+        def fake_request(method, path, **kwargs):
+            captured["method"], captured["path"], captured["kwargs"] = (
+                method,
+                path,
+                kwargs,
+            )
+            return R()
+
+        accounts._request = fake_request  # type: ignore[method-assign]
+        result = Accounts.monthly_usage(accounts, "u1")
+
+        assert result == 3
+        month_start = (
+            datetime.now(UTC)
+            .replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            .isoformat()
+        )
+        assert captured["kwargs"]["params"]["created_at"] == f"gte.{month_start}"
+        assert captured["kwargs"]["params"]["profile_id"] == "eq.u1"
+        assert captured["kwargs"]["params"]["outcome"] == "eq.completed"
+
+
+class TestReferralBonus:
+    def test_six_referrals_grant_three_bonus_analyses(self):
+        # Product decision 2026-09-15, pinned so the numbers can't drift
+        # silently away from what's reported to the user.
+        assert (REFERRAL_CONVERSIONS_PER_BONUS, REFERRAL_BONUS_ANALYSES) == (6, 3)
+
+    def test_no_bonus_below_the_threshold(self):
+        assert bonus_analyses_for(0) == 0
+        assert bonus_analyses_for(5) == 0
+
+    def test_one_bonus_at_the_threshold(self):
+        assert bonus_analyses_for(6) == 3
+
+    def test_bonus_accumulates_per_complete_group(self):
+        assert bonus_analyses_for(11) == 3
+        assert bonus_analyses_for(18) == 9
+
+    def test_next_reward_at_the_first_threshold(self):
+        assert next_reward_at(0) == 6
+        assert next_reward_at(5) == 6
+
+    def test_next_reward_at_the_following_threshold(self):
+        assert next_reward_at(6) == 12
+        assert next_reward_at(9) == 12
+
+    def test_effective_allowance_adds_the_bonus_to_the_free_tier(self):
+        assert effective_allowance(0) == FREE_MONTHLY_ANALYSES
+        assert effective_allowance(6) == FREE_MONTHLY_ANALYSES + 3
+
+
+class TestReferralCode:
+    def test_returns_the_existing_code_without_writing(self):
+        accounts = FakeAccounts()
+        accounts.profile_row = {
+            "id": "u1",
+            "display_name": None,
+            "is_invited": True,
+            "is_grandfathered": False,
+            "onboarding_completed_at": None,
+            "referral_code": "ABCD1234",
+        }
+
+        def fake_request(method, path, **kwargs):
+            if method == "GET" and path == "/profiles":
+
+                class R:
+                    @staticmethod
+                    def json():
+                        return [accounts.profile_row]
+
+                return R()
+            raise AssertionError(f"unexpected write: {method} {path}")
+
+        accounts._request = fake_request  # type: ignore[method-assign]
+        assert Accounts.get_referral_code(accounts, "u1") == "ABCD1234"
+
+    def test_assigns_and_persists_a_new_code_when_absent(self):
+        accounts = FakeAccounts()
+        profile_row = {
+            "id": "u1",
+            "display_name": None,
+            "is_invited": True,
+            "is_grandfathered": False,
+            "onboarding_completed_at": None,
+            "referral_code": None,
+        }
+        calls = []
+
+        def fake_request(method, path, **kwargs):
+            calls.append((method, path, kwargs))
+            if (
+                method == "GET"
+                and path == "/profiles"
+                and "id" in kwargs.get("params", {})
+            ):
+
+                class R:
+                    @staticmethod
+                    def json():
+                        return [profile_row]
+
+                return R()
+            if method == "GET" and path == "/profiles":
+                # Uniqueness check — nothing else in the store has this code.
+                class R:
+                    @staticmethod
+                    def json():
+                        return []
+
+                return R()
+
+            class R:
+                @staticmethod
+                def json():
+                    return {}
+
+            return R()
+
+        accounts._request = fake_request  # type: ignore[method-assign]
+        code = Accounts.get_referral_code(accounts, "u1")
+
+        assert isinstance(code, str) and len(code) == 8
+        patch_calls = [c for c in calls if c[0] == "PATCH"]
+        assert len(patch_calls) == 1
+        assert patch_calls[0][2]["json"]["referral_code"] == code
+
+    def test_retries_on_a_collision(self):
+        accounts = FakeAccounts()
+        profile_row = {
+            "id": "u1",
+            "display_name": None,
+            "is_invited": True,
+            "is_grandfathered": False,
+            "onboarding_completed_at": None,
+            "referral_code": None,
+        }
+        uniqueness_checks = {"count": 0}
+
+        def fake_request(method, path, **kwargs):
+            if method == "GET" and "id" in kwargs.get("params", {}):
+
+                class R:
+                    @staticmethod
+                    def json():
+                        return [profile_row]
+
+                return R()
+            if method == "GET":
+                uniqueness_checks["count"] += 1
+                taken = uniqueness_checks["count"] == 1
+
+                class R:
+                    @staticmethod
+                    def json():
+                        return [{"id": "someone-else"}] if taken else []
+
+                return R()
+
+            class R:
+                @staticmethod
+                def json():
+                    return {}
+
+            return R()
+
+        accounts._request = fake_request  # type: ignore[method-assign]
+        Accounts.get_referral_code(accounts, "u1")
+
+        assert uniqueness_checks["count"] == 2
+
+    def test_raises_when_no_profile_exists(self):
+        accounts = FakeAccounts()
+
+        def fake_request(method, path, **kwargs):
+            class R:
+                @staticmethod
+                def json():
+                    return []
+
+            return R()
+
+        accounts._request = fake_request  # type: ignore[method-assign]
+        with pytest.raises(AccountsError, match="no profile"):
+            Accounts.get_referral_code(accounts, "u1")
+
+
+class TestReferralCounts:
+    def test_reads_referred_and_converted_counts(self):
+        accounts = FakeAccounts()
+        calls = []
+
+        def fake_request(method, path, **kwargs):
+            calls.append((method, path, kwargs))
+
+            class R:
+                headers = {"content-range": "0-0/2"}
+
+                @staticmethod
+                def json():
+                    return []
+
+            return R()
+
+        accounts._request = fake_request  # type: ignore[method-assign]
+        counts = Accounts.referral_counts(accounts, "u1")
+
+        assert (counts.referred_count, counts.converted_count) == (2, 2)
+        assert calls[0][1] == "/referrals"
+        assert calls[0][2]["params"]["referrer_profile_id"] == "eq.u1"
+        assert "converted_at" not in calls[0][2]["params"]
+        assert calls[1][2]["params"]["converted_at"] == "not.is.null"

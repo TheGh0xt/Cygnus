@@ -98,3 +98,43 @@ class TestRecordEvent:
 
         with pytest.raises(GrowthError):
             growth.record_event("profile-1", "analysis_started", None, {})
+
+
+class TestRecordPayIntent:
+    def test_writes_the_expected_row(self):
+        growth = FakeGrowth()
+        growth.next_response = FakeResponse(201)
+        growth.record_pay_intent("profile-1", 19.0, "pro-monthly", 19.0)
+
+        method, path, kwargs = growth.calls[0]
+        assert (method, path) == ("POST", "/user_events")
+        assert kwargs["json"] == {
+            "profile_id": "profile-1",
+            "name": "pay_intent_clicked",
+            "ui_mode": None,
+            "properties": {
+                "price_shown_usd": "19.0",
+                "list_price_usd": "19.0",
+                "plan": "pro-monthly",
+            },
+        }
+
+    def test_records_the_server_list_price_separately_from_the_client_value(self):
+        """The client's price_shown_usd and the server's own list price are
+
+        recorded separately so the two can be compared later.
+        """
+        growth = FakeGrowth()
+        growth.next_response = FakeResponse(201)
+        growth.record_pay_intent("profile-1", 0.0, "pro-monthly", 19.0)
+
+        _, _, kwargs = growth.calls[0]
+        assert kwargs["json"]["properties"]["price_shown_usd"] == "0.0"
+        assert kwargs["json"]["properties"]["list_price_usd"] == "19.0"
+
+    def test_raises_on_failure(self):
+        growth = FakeGrowth()
+        growth.next_response = FakeResponse(500, "internal error")
+
+        with pytest.raises(GrowthError):
+            growth.record_pay_intent("profile-1", 19.0, "pro-monthly", 19.0)
