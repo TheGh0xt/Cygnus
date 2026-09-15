@@ -68,6 +68,14 @@ def is_production() -> bool:
     return pmie_environment() == "production"
 
 
+def resend_api_key() -> str:
+    return _clean(os.getenv("RESEND_API_KEY"))
+
+
+def resend_from_address() -> str:
+    return _clean(os.getenv("RESEND_FROM_ADDRESS"))
+
+
 def describe_supabase_config() -> dict:
     """A safe summary for diagnostics — never the key itself."""
     key = supabase_secret_key()
