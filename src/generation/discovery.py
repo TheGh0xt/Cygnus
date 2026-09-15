@@ -27,6 +27,21 @@ class DiscoveryError(Exception):
     """Sagittarius could not be reached, or its reply could not be read."""
 
 
+def _unwrap_exception_group(exc: BaseException) -> BaseException:
+    """Return the first real failure inside an ExceptionGroup, recursively.
+
+    anyio's TaskGroup — used internally by ClientSession and
+    streamable_http_client — wraps every failure in an ExceptionGroup whose
+    own str() is the unhelpful "unhandled errors in a TaskGroup
+    (1 sub-exception)". That string is what reached the cron log on every one
+    of 39 failed production runs (F5), hiding whether the real cause was a
+    403 from a misconfigured proxy, a timeout, or something else entirely.
+    """
+    while isinstance(exc, ExceptionGroup) and exc.exceptions:
+        exc = exc.exceptions[0]
+    return exc
+
+
 def parse_moving_markets(result: object) -> list[Candidate]:
     """Turn a get_moving_markets tool result into candidates.
 
@@ -156,9 +171,15 @@ class SagittariusDiscovery:
                 result = await session.call_tool(_TOOL, args)
         except Exception as exc:
             # Wrapped, not swallowed. The caller turns this into a typed skip
-            # reason that reaches the cron log.
+            # reason that reaches the cron log. Unwrapped first (F5): anyio's
+            # TaskGroup wraps every failure from the async with above in an
+            # ExceptionGroup whose own message is the useless "unhandled
+            # errors in a TaskGroup (1 sub-exception)" — every one of 39
+            # failed production runs logged exactly that, with the real
+            # cause hidden inside it.
+            real = _unwrap_exception_group(exc)
             raise DiscoveryError(
-                f"could not reach Sagittarius at {self.mcp_url}: {exc}"
+                f"could not reach Sagittarius at {self.mcp_url}: {real}"
             ) from exc
 
         return parse_moving_markets(result)

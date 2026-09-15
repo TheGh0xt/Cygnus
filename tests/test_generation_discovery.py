@@ -9,9 +9,11 @@ import json
 
 import pytest
 
+from src.generation import discovery as discovery_module
 from src.generation.discovery import (
     DiscoveryError,
     SagittariusDiscovery,
+    _unwrap_exception_group,
     parse_moving_markets,
 )
 
@@ -126,6 +128,75 @@ class TestFailuresAreLoud:
 
         with pytest.raises(DiscoveryError):
             parse_moving_markets(CallToolResult(content=[], isError=False))
+
+
+class TestUnwrapExceptionGroup:
+    """F5: production generation has failed on every one of 39 runs since
+    09-07 with the same useless message — "unhandled errors in a TaskGroup
+    (1 sub-exception)" — because anyio's TaskGroup (used internally by
+    ClientSession/streamable_http_client) wraps every failure in an
+    ExceptionGroup whose own str() hides the real cause."""
+
+    def test_plain_exception_is_returned_unchanged(self):
+        exc = ConnectionRefusedError("refused")
+        assert _unwrap_exception_group(exc) is exc
+
+    def test_unwraps_a_single_level_group(self):
+        real = ConnectionRefusedError("[Errno 61] Connection refused")
+        group = ExceptionGroup("unhandled errors in a TaskGroup", [real])
+        assert _unwrap_exception_group(group) is real
+
+    def test_unwraps_nested_groups(self):
+        real = TimeoutError("timed out")
+        inner = ExceptionGroup("inner", [real])
+        outer = ExceptionGroup("unhandled errors in a TaskGroup", [inner])
+        assert _unwrap_exception_group(outer) is real
+
+
+class _RaisingAsyncCM:
+    """A stand-in for mcp_http_client that raises on entry, so moving_markets
+    exercises its real except-and-wrap path without a live MCP session."""
+
+    def __init__(self, exc: BaseException):
+        self._exc = exc
+
+    async def __aenter__(self):
+        raise self._exc
+
+    async def __aexit__(self, *args):
+        return False
+
+
+class TestDiscoveryErrorUnwrapsExceptionGroups:
+    async def test_reports_the_real_cause_not_the_taskgroup_wrapper(self, monkeypatch):
+        real = ConnectionRefusedError("[Errno 61] Connection refused")
+        group = ExceptionGroup("unhandled errors in a TaskGroup", [real])
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(group),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError) as exc_info:
+            await discovery.moving_markets()
+
+        message = str(exc_info.value)
+        assert "Connection refused" in message
+        assert "unhandled errors in a TaskGroup" not in message
+
+    async def test_a_plain_exception_still_reports_its_own_message(self, monkeypatch):
+        # Not every failure is wrapped in a TaskGroup — a plain exception
+        # (e.g. a DNS failure raised directly) must pass through unchanged.
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(OSError("nodename nor servname")),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError, match="nodename nor servname"):
+            await discovery.moving_markets()
 
 
 class TestAuth:
