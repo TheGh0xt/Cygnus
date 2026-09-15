@@ -10,6 +10,7 @@ from src.api.accounts import (
     REFERRAL_CONVERSIONS_PER_BONUS,
     Accounts,
     AccountsError,
+    Profile,
     bonus_analyses_for,
     effective_allowance,
     next_reward_at,
@@ -312,98 +313,139 @@ class TestReferralCode:
         assert Accounts.get_referral_code(accounts, "u1") == "ABCD1234"
 
     def test_assigns_and_persists_a_new_code_when_absent(self):
+        """A single conditional PATCH, not a check-then-set: see
+
+        _assign_referral_code's docstring for the TOCTOU it replaces.
+        """
         accounts = FakeAccounts()
-        profile_row = {
-            "id": "u1",
-            "display_name": None,
-            "is_invited": True,
-            "is_grandfathered": False,
-            "onboarding_completed_at": None,
-            "referral_code": None,
-        }
         calls = []
 
-        def fake_request(method, path, **kwargs):
+        class R:
+            def __init__(self, rows):
+                self.status_code = 200
+                self._rows = rows
+
+            def json(self):
+                return self._rows
+
+        def fake_request_allow(method, path, ok_extra=(), **kwargs):
             calls.append((method, path, kwargs))
-            if (
-                method == "GET"
-                and path == "/profiles"
-                and "id" in kwargs.get("params", {})
-            ):
-
-                class R:
-                    @staticmethod
-                    def json():
-                        return [profile_row]
-
-                return R()
             if method == "GET" and path == "/profiles":
-                # Uniqueness check — nothing else in the store has this code.
-                class R:
-                    @staticmethod
-                    def json():
-                        return []
+                return R(
+                    [
+                        {
+                            "id": "u1",
+                            "display_name": None,
+                            "is_invited": True,
+                            "is_grandfathered": False,
+                            "onboarding_completed_at": None,
+                            "referral_code": None,
+                        }
+                    ]
+                )
+            assert method == "PATCH" and path == "/profiles"
+            code = kwargs["json"]["referral_code"]
+            return R([{"referral_code": code}])
 
-                return R()
-
-            class R:
-                @staticmethod
-                def json():
-                    return {}
-
-            return R()
-
-        accounts._request = fake_request  # type: ignore[method-assign]
+        accounts._request = fake_request_allow  # type: ignore[method-assign]
+        accounts._request_allow = fake_request_allow  # type: ignore[method-assign]
         code = Accounts.get_referral_code(accounts, "u1")
 
         assert isinstance(code, str) and len(code) == 8
         patch_calls = [c for c in calls if c[0] == "PATCH"]
         assert len(patch_calls) == 1
         assert patch_calls[0][2]["json"]["referral_code"] == code
+        assert patch_calls[0][2]["params"] == {
+            "id": "eq.u1",
+            "referral_code": "is.null",
+        }
 
     def test_retries_on_a_collision(self):
+        """A 409 (the guessed code collided with someone else's row) tries a
+
+        fresh random code, rather than retrying the same one or 503ing.
+        """
         accounts = FakeAccounts()
-        profile_row = {
-            "id": "u1",
-            "display_name": None,
-            "is_invited": True,
-            "is_grandfathered": False,
-            "onboarding_completed_at": None,
-            "referral_code": None,
-        }
-        uniqueness_checks = {"count": 0}
+        attempts = {"count": 0}
 
-        def fake_request(method, path, **kwargs):
-            if method == "GET" and "id" in kwargs.get("params", {}):
+        class R:
+            def __init__(self, status_code, rows=None):
+                self.status_code = status_code
+                self._rows = rows or []
 
-                class R:
-                    @staticmethod
-                    def json():
-                        return [profile_row]
+            def json(self):
+                return self._rows
 
-                return R()
-            if method == "GET":
-                uniqueness_checks["count"] += 1
-                taken = uniqueness_checks["count"] == 1
+        def fake_request_allow(method, path, ok_extra=(), **kwargs):
+            if method == "GET" and path == "/profiles":
+                return R(
+                    200,
+                    [
+                        {
+                            "id": "u1",
+                            "display_name": None,
+                            "is_invited": True,
+                            "is_grandfathered": False,
+                            "onboarding_completed_at": None,
+                            "referral_code": None,
+                        }
+                    ],
+                )
+            assert method == "PATCH" and path == "/profiles"
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                return R(409)
+            code = kwargs["json"]["referral_code"]
+            return R(200, [{"referral_code": code}])
 
-                class R:
-                    @staticmethod
-                    def json():
-                        return [{"id": "someone-else"}] if taken else []
-
-                return R()
-
-            class R:
-                @staticmethod
-                def json():
-                    return {}
-
-            return R()
-
-        accounts._request = fake_request  # type: ignore[method-assign]
+        accounts._request = fake_request_allow  # type: ignore[method-assign]
+        accounts._request_allow = fake_request_allow  # type: ignore[method-assign]
         Accounts.get_referral_code(accounts, "u1")
 
-        assert uniqueness_checks["count"] == 2
+        assert attempts["count"] == 2
+
+    def test_a_concurrent_winner_is_read_back_on_zero_rows(self):
+        """0 rows back means the conditional match failed: someone else's
+
+        concurrent request already set referral_code first. Re-read it
+        rather than erroring or generating a second, orphaned code.
+        """
+        accounts = FakeAccounts()
+
+        class R:
+            def __init__(self, rows):
+                self.status_code = 200
+                self._rows = rows
+
+            def json(self):
+                return self._rows
+
+        calls = {"get": 0}
+
+        def fake_request_allow(method, path, ok_extra=(), **kwargs):
+            if method == "GET" and path == "/profiles":
+                calls["get"] += 1
+                referral_code = None if calls["get"] == 1 else "WON1234"
+                return R(
+                    [
+                        {
+                            "id": "u1",
+                            "display_name": None,
+                            "is_invited": True,
+                            "is_grandfathered": False,
+                            "onboarding_completed_at": None,
+                            "referral_code": referral_code,
+                        }
+                    ]
+                )
+            assert method == "PATCH" and path == "/profiles"
+            return R([])  # conditional match failed — someone else won it
+
+        accounts._request = fake_request_allow  # type: ignore[method-assign]
+        accounts._request_allow = fake_request_allow  # type: ignore[method-assign]
+        code = Accounts.get_referral_code(accounts, "u1")
+
+        assert code == "WON1234"
 
     def test_raises_when_no_profile_exists(self):
         accounts = FakeAccounts()
@@ -446,3 +488,202 @@ class TestReferralCounts:
         assert calls[0][2]["params"]["referrer_profile_id"] == "eq.u1"
         assert "converted_at" not in calls[0][2]["params"]
         assert calls[1][2]["params"]["converted_at"] == "not.is.null"
+
+
+def _profile(**overrides) -> Profile:
+    defaults = dict(
+        id="referred-1",
+        display_name=None,
+        is_invited=True,
+        is_grandfathered=False,
+        onboarding_completed_at=None,
+    )
+    defaults.update(overrides)
+    return Profile(**defaults)
+
+
+class TestSyncReferralAttribution:
+    def test_skips_when_already_attributed(self):
+        accounts = FakeAccounts()
+        profile = _profile(referred_by="someone")
+
+        def boom(*args, **kwargs):
+            raise AssertionError("must not make any request once already attributed")
+
+        accounts._request = boom  # type: ignore[method-assign]
+        accounts._request_allow = boom  # type: ignore[method-assign]
+        Accounts.sync_referral_attribution(accounts, profile, "referred@example.com")
+
+    def test_skips_when_no_email(self):
+        accounts = FakeAccounts()
+        profile = _profile()
+
+        def boom(*args, **kwargs):
+            raise AssertionError("must not make any request with no email")
+
+        accounts._request = boom  # type: ignore[method-assign]
+        accounts._request_allow = boom  # type: ignore[method-assign]
+        Accounts.sync_referral_attribution(accounts, profile, None)
+
+    def test_attributes_via_the_waitlist_referral_code(self):
+        accounts = FakeAccounts()
+        profile = _profile()
+        calls = []
+
+        class R:
+            def __init__(self, rows):
+                self.status_code = 200
+                self._rows = rows
+
+            def json(self):
+                return self._rows
+
+        def fake(method, path, ok_extra=(), **kwargs):
+            calls.append((method, path, kwargs))
+            if path == "/waitlist":
+                return R([{"referral_code": "REF12345"}])
+            if path == "/profiles" and method == "GET":
+                return R([{"id": "referrer-1"}])
+            return R([])
+
+        accounts._request = fake  # type: ignore[method-assign]
+        accounts._request_allow = fake  # type: ignore[method-assign]
+        Accounts.sync_referral_attribution(accounts, profile, "referred@example.com")
+
+        posts = [c for c in calls if c[0] == "POST" and c[1] == "/referrals"]
+        assert posts == [
+            (
+                "POST",
+                "/referrals",
+                posts[0][2],
+            )
+        ]
+        assert posts[0][2]["json"] == {
+            "referrer_profile_id": "referrer-1",
+            "referred_profile_id": "referred-1",
+        }
+        patches = [c for c in calls if c[0] == "PATCH" and c[1] == "/profiles"]
+        assert patches[0][2]["json"]["referred_by"] == "referrer-1"
+
+    def test_ignores_self_referral(self):
+        accounts = FakeAccounts()
+        profile = _profile(id="same-user")
+
+        class R:
+            def __init__(self, rows):
+                self.status_code = 200
+                self._rows = rows
+
+            def json(self):
+                return self._rows
+
+        def fake(method, path, ok_extra=(), **kwargs):
+            if path == "/waitlist":
+                return R([{"referral_code": "OWN12345"}])
+            if path == "/profiles" and method == "GET":
+                return R([{"id": "same-user"}])
+            raise AssertionError(f"unexpected write: {method} {path}")
+
+        accounts._request = fake  # type: ignore[method-assign]
+        accounts._request_allow = fake  # type: ignore[method-assign]
+        Accounts.sync_referral_attribution(accounts, profile, "referred@example.com")
+
+    def test_no_waitlist_row_is_a_no_op(self):
+        accounts = FakeAccounts()
+        profile = _profile()
+
+        class R:
+            def __init__(self, rows):
+                self.status_code = 200
+                self._rows = rows
+
+            def json(self):
+                return self._rows
+
+        def fake(method, path, ok_extra=(), **kwargs):
+            if path == "/waitlist":
+                return R([])
+            raise AssertionError(f"unexpected write: {method} {path}")
+
+        accounts._request = fake  # type: ignore[method-assign]
+        accounts._request_allow = fake  # type: ignore[method-assign]
+        Accounts.sync_referral_attribution(accounts, profile, "referred@example.com")
+
+    def test_a_409_on_the_referral_insert_is_treated_as_already_attributed(self):
+        """The referrals_referred_once unique index makes this idempotent —
+
+        a concurrent /me call that already attributed the same profile must
+        not raise here.
+        """
+        accounts = FakeAccounts()
+        profile = _profile()
+
+        class R:
+            def __init__(self, status_code, rows=None):
+                self.status_code = status_code
+                self._rows = rows or []
+
+            def json(self):
+                return self._rows
+
+        def fake(method, path, ok_extra=(), **kwargs):
+            if path == "/waitlist":
+                return R(200, [{"referral_code": "REF12345"}])
+            if path == "/profiles" and method == "GET":
+                return R(200, [{"id": "referrer-1"}])
+            if path == "/referrals":
+                assert 409 in ok_extra
+                return R(409)
+            return R(200)
+
+        accounts._request = fake  # type: ignore[method-assign]
+        accounts._request_allow = fake  # type: ignore[method-assign]
+        Accounts.sync_referral_attribution(accounts, profile, "referred@example.com")
+
+    def test_a_store_failure_never_propagates(self):
+        """Best-effort, same posture as record_usage: /me must keep working."""
+        accounts = FakeAccounts()
+        profile = _profile()
+
+        def boom(*args, **kwargs):
+            raise AccountsError("store down")
+
+        accounts._request = boom  # type: ignore[method-assign]
+        accounts._request_allow = boom  # type: ignore[method-assign]
+        Accounts.sync_referral_attribution(accounts, profile, "referred@example.com")
+
+
+class TestMarkReferralConverted:
+    def test_patches_the_referral_row_conditionally(self):
+        accounts = FakeAccounts()
+        calls = []
+
+        def fake_request(method, path, **kwargs):
+            calls.append((method, path, kwargs))
+
+            class R:
+                @staticmethod
+                def json():
+                    return {}
+
+            return R()
+
+        accounts._request = fake_request  # type: ignore[method-assign]
+        Accounts.mark_referral_converted(accounts, "referred-1")
+
+        method, path, kwargs = calls[0]
+        assert (method, path) == ("PATCH", "/referrals")
+        assert kwargs["params"] == {
+            "referred_profile_id": "eq.referred-1",
+            "converted_at": "is.null",
+        }
+        assert kwargs["json"] == {"converted_at": "now()"}
+
+    def test_a_store_failure_never_propagates(self):
+        accounts = FakeAccounts()
+
+        def boom(*args, **kwargs):
+            raise AccountsError("store down")
+
+        accounts._request = boom  # type: ignore[method-assign]
+        Accounts.mark_referral_converted(accounts, "referred-1")

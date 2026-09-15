@@ -304,9 +304,7 @@ class Accounts:
                 json={"referred_by": referrer_id, "updated_at": "now()"},
             )
         except AccountsError:
-            logger.exception(
-                "failed to sync referral attribution for %s", profile.id
-            )
+            logger.exception("failed to sync referral attribution for %s", profile.id)
 
     def mark_referral_converted(self, profile_id: str) -> None:
         """Mark this referred user's row converted, once their email is verified.

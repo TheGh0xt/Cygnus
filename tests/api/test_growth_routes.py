@@ -380,7 +380,9 @@ class TestBillingIntentRoute:
         assert response.status_code == 204
         assert fake.intent_calls == [("user-1", 19.0, "pro-monthly", 19.0)]
 
-    def test_records_the_servers_own_list_price_regardless_of_client_value(self, client):
+    def test_records_the_servers_own_list_price_regardless_of_client_value(
+        self, client
+    ):
         """A client could send any price_shown_usd; the server's own
 
         PRO_MONTHLY_PRICE_USD is what gets recorded as list_price_usd,
