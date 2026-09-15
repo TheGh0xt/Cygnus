@@ -13,6 +13,7 @@ from src.generation import discovery as discovery_module
 from src.generation.discovery import (
     DiscoveryError,
     SagittariusDiscovery,
+    _count_leaves,
     _unwrap_exception_group,
     parse_moving_markets,
 )
@@ -153,6 +154,23 @@ class TestUnwrapExceptionGroup:
         assert _unwrap_exception_group(outer) is real
 
 
+class TestCountLeaves:
+    """Backs the optional "(+N more)" suffix — a group with several failed
+    tasks must not silently drop every leaf but the first."""
+
+    def test_a_plain_exception_counts_as_one(self):
+        assert _count_leaves(ValueError("x")) == 1
+
+    def test_flat_group_counts_every_leaf(self):
+        group = ExceptionGroup("g", [ValueError("a"), TypeError("b")])
+        assert _count_leaves(group) == 2
+
+    def test_nested_groups_count_recursively(self):
+        inner = ExceptionGroup("inner", [ValueError("a"), TypeError("b")])
+        outer = ExceptionGroup("outer", [inner, KeyError("c")])
+        assert _count_leaves(outer) == 3
+
+
 class _RaisingAsyncCM:
     """A stand-in for mcp_http_client that raises on entry, so moving_markets
     exercises its real except-and-wrap path without a live MCP session."""
@@ -196,6 +214,39 @@ class TestDiscoveryErrorUnwrapsExceptionGroups:
 
         discovery = SagittariusDiscovery("http://localhost:8080/mcp")
         with pytest.raises(DiscoveryError, match="nodename nor servname"):
+            await discovery.moving_markets()
+
+    async def test_empty_message_leaf_still_names_its_type(self, monkeypatch):
+        # httpx's ReadTimeout/ConnectTimeout and anyio's ClosedResourceError/
+        # EndOfStream commonly stringify to "" — without the type name the
+        # cron log would read "...: " with nothing after it, no better off
+        # than the TaskGroup wrapper text this PR replaces.
+        group = ExceptionGroup("unhandled errors in a TaskGroup", [TimeoutError()])
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(group),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError, match="TimeoutError"):
+            await discovery.moving_markets()
+
+    async def test_several_leaves_reports_how_many_more(self, monkeypatch):
+        # A TaskGroup can fail more than one task at once; dropping every
+        # leaf but the first without a trace would hide that.
+        group = ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [ConnectionRefusedError("refused"), TimeoutError("timed out")],
+        )
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(group),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError, match=r"\(\+1 more\)"):
             await discovery.moving_markets()
 
 

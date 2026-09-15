@@ -42,6 +42,20 @@ def _unwrap_exception_group(exc: BaseException) -> BaseException:
     return exc
 
 
+def _count_leaves(exc: BaseException) -> int:
+    """Total non-group exceptions inside `exc`, flattened recursively.
+
+    Backs the "(+N more)" suffix: a TaskGroup can fail more than one task at
+    once, and reporting only the first leaf without a trace of the rest
+    would silently drop that.
+    """
+    if isinstance(exc, ExceptionGroup):
+        if not exc.exceptions:
+            return 0
+        return sum(_count_leaves(sub) for sub in exc.exceptions)
+    return 1
+
+
 def parse_moving_markets(result: object) -> list[Candidate]:
     """Turn a get_moving_markets tool result into candidates.
 
@@ -178,8 +192,16 @@ class SagittariusDiscovery:
             # failed production runs logged exactly that, with the real
             # cause hidden inside it.
             real = _unwrap_exception_group(exc)
+            # The type name is load-bearing, not decoration: httpx's
+            # ReadTimeout/ConnectTimeout and anyio's ClosedResourceError/
+            # EndOfStream commonly stringify to "" — without the type, the
+            # log would read "...: " with nothing after it, no better than
+            # the wrapper text this replaces.
+            remaining = _count_leaves(exc) - 1
+            suffix = f" (+{remaining} more)" if remaining > 0 else ""
             raise DiscoveryError(
-                f"could not reach Sagittarius at {self.mcp_url}: {real}"
+                f"could not reach Sagittarius at {self.mcp_url}: "
+                f"{type(real).__name__}: {real}{suffix}"
             ) from exc
 
         return parse_moving_markets(result)
