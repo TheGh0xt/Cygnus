@@ -49,6 +49,16 @@ _REFERRAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _REFERRAL_CODE_LENGTH = 8
 
 
+def _escape_ilike(value: str) -> str:
+    """Escape PostgREST's `ilike` wildcard (`*`) so a literal one in the
+
+    input can't turn an exact match into a pattern match. Backslash is
+    escaped first so a value that already contains one doesn't get
+    double-escaped by the `*` substitution below.
+    """
+    return value.replace("\\", "\\\\").replace("*", "\\*")
+
+
 def bonus_analyses_for(converted_count: int) -> int:
     """Bonus analyses earned so far: REFERRAL_BONUS_ANALYSES for every
 
@@ -244,7 +254,7 @@ class Accounts:
             ),
         )
 
-    def sync_referral_attribution(self, profile: Profile, email: str | None) -> None:
+    def sync_referral_attribution(self, profile: Profile, email: str | None) -> bool:
         """Attribute this signup to a referrer, the first time it's checked.
 
         Nothing writes `referrals` at signup: the referral code a visitor
@@ -252,22 +262,36 @@ class Accounts:
         `/me` on every load until `profile.referred_by` is set, so it costs
         two reads once attribution has already happened. Best-effort, like
         `record_usage` — a failure here must not fail `/me`.
+
+        Returns whether this profile is now known to be referred — true if
+        this call just attributed it (or found it already attributed via a
+        409), false otherwise. The caller's `profile` was read before this
+        call, so its own `referred_by` is stale exactly in the case this
+        return value exists to cover.
         """
-        if profile.referred_by is not None or not email:
-            return
+        if profile.referred_by is not None:
+            return True
+        if not email:
+            return False
         try:
+            # `ilike`, not `eq`: the waitlist row keeps whatever case the
+            # visitor originally typed (the unique index is on
+            # lower(email), not the column), while the JWT's email is
+            # lowercase — an exact match would silently never attribute a
+            # mixed-case signup. Wildcards escaped so a literal '*' in an
+            # email can't turn this into a pattern match.
             waitlist_rows = self._request(
                 "GET",
                 "/waitlist",
                 params={
-                    "email": f"eq.{email}",
+                    "email": f"ilike.{_escape_ilike(email)}",
                     "referral_code": "not.is.null",
                     "select": "referral_code",
                     "limit": 1,
                 },
             ).json()
             if not waitlist_rows:
-                return
+                return False
             referral_code = waitlist_rows[0]["referral_code"]
 
             referrer_rows = self._request(
@@ -280,10 +304,10 @@ class Accounts:
                 },
             ).json()
             if not referrer_rows:
-                return
+                return False
             referrer_id = referrer_rows[0]["id"]
             if referrer_id == profile.id:
-                return  # self-referral: the code happened to be their own
+                return False  # self-referral: the code happened to be their own
 
             # 409 from referrals_referred_once means another call already
             # attributed this profile — already done, not an error.
@@ -303,8 +327,10 @@ class Accounts:
                 params={"id": f"eq.{profile.id}"},
                 json={"referred_by": referrer_id, "updated_at": "now()"},
             )
+            return True
         except AccountsError:
             logger.exception("failed to sync referral attribution for %s", profile.id)
+            return False
 
     def mark_referral_converted(self, profile_id: str) -> None:
         """Mark this referred user's row converted, once their email is verified.

@@ -50,6 +50,7 @@ class FakeAccounts:
         is_grandfathered=False,
         counts=None,
         referred_by=None,
+        attribution_result=True,
     ):
         self.configured = True
         self.profile = Profile(
@@ -64,6 +65,7 @@ class FakeAccounts:
         self.counts = counts or ReferralCounts(referred_count=0, converted_count=0)
         self.attribution_calls: list[tuple] = []
         self.conversion_calls: list[str] = []
+        self._attribution_result = attribution_result
 
     def get_profile(self, profile_id):
         return self.profile
@@ -79,6 +81,7 @@ class FakeAccounts:
 
     def sync_referral_attribution(self, profile, email):
         self.attribution_calls.append((profile.id, email))
+        return self._attribution_result
 
     def mark_referral_converted(self, profile_id):
         self.conversion_calls.append(profile_id)
@@ -147,3 +150,31 @@ def test_me_does_not_mark_converted_when_the_caller_is_unverified(authed_client)
     authed_client.get("/v1/me", headers={"authorization": "Bearer user-1"})
 
     assert fake.conversion_calls == []
+
+
+def test_me_does_not_mark_converted_when_never_referred(authed_client):
+    """Most users were never referred at all — a verified-email load must
+
+    not PATCH a referrals row that doesn't exist for them.
+    """
+    authed_client.app.state.jwks = FakeJwks(email_verified=True)
+    fake = FakeAccounts(referred_by=None, attribution_result=False)
+    authed_client.app.state.accounts = fake
+
+    authed_client.get("/v1/me", headers={"authorization": "Bearer user-1"})
+
+    assert fake.conversion_calls == []
+
+
+def test_me_marks_converted_when_already_referred_before_this_load(authed_client):
+    """profile.referred_by was already set on a prior load — sync_referral_attribution
+
+    short-circuits (no attribution work to redo), but conversion must still fire.
+    """
+    authed_client.app.state.jwks = FakeJwks(email_verified=True)
+    fake = FakeAccounts(referred_by="referrer-1", attribution_result=True)
+    authed_client.app.state.accounts = fake
+
+    authed_client.get("/v1/me", headers={"authorization": "Bearer user-1"})
+
+    assert fake.conversion_calls == [fake.profile.id]

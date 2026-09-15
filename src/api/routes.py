@@ -320,11 +320,16 @@ async def stream_analysis(
     summary="The signed-in user",
     responses=_AUTH_ERRORS,
 )
-async def me(request: Request, user: CurrentUser = Depends(get_current_user)) -> dict:
+def me(request: Request, user: CurrentUser = Depends(get_current_user)) -> dict:
     """The caller's profile, interests and usage.
 
     One call so the client can render the whole authenticated shell — header,
     usage indicator, onboarding state — without a waterfall of requests.
+
+    Plain `def`, matching `join_waitlist`'s fix: every call here is a
+    blocking Supabase request (up to ~6 of them, once referral attribution
+    and conversion are included), and an `async def` with no `await` runs
+    them all inline on the single event loop this process uses.
     """
     accounts = request.app.state.accounts
     if not accounts.configured:
@@ -352,8 +357,12 @@ async def me(request: Request, user: CurrentUser = Depends(get_current_user)) ->
         )
 
     # Best-effort, same posture as record_usage: neither call may fail /me.
-    accounts.sync_referral_attribution(profile, user.email)
-    if user.email_verified:
+    # sync_referral_attribution's return, not just profile.referred_by (read
+    # above, so stale if this call is the one that just attributed), decides
+    # whether a conversion PATCH is worth trying — most users were never
+    # referred, and that PATCH would otherwise run on every verified load.
+    referred = accounts.sync_referral_attribution(profile, user.email)
+    if user.email_verified and referred:
         accounts.mark_referral_converted(profile.id)
 
     return {

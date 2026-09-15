@@ -1695,7 +1695,7 @@
     },
     "/v1/me": {
       "get": {
-        "description": "The caller's profile, interests and usage.\n\nOne call so the client can render the whole authenticated shell \u2014 header,\nusage indicator, onboarding state \u2014 without a waterfall of requests.",
+        "description": "The caller's profile, interests and usage.\n\nOne call so the client can render the whole authenticated shell \u2014 header,\nusage indicator, onboarding state \u2014 without a waterfall of requests.\n\nPlain `def`, matching `join_waitlist`'s fix: every call here is a\nblocking Supabase request (up to ~6 of them, once referral attribution\nand conversion are included), and an `async def` with no `await` runs\nthem all inline on the single event loop this process uses.",
         "operationId": "me_v1_me_get",
         "responses": {
           "200": {

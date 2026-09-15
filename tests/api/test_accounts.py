@@ -512,7 +512,10 @@ class TestSyncReferralAttribution:
 
         accounts._request = boom  # type: ignore[method-assign]
         accounts._request_allow = boom  # type: ignore[method-assign]
-        Accounts.sync_referral_attribution(accounts, profile, "referred@example.com")
+        result = Accounts.sync_referral_attribution(
+            accounts, profile, "referred@example.com"
+        )
+        assert result is True
 
     def test_skips_when_no_email(self):
         accounts = FakeAccounts()
@@ -523,7 +526,8 @@ class TestSyncReferralAttribution:
 
         accounts._request = boom  # type: ignore[method-assign]
         accounts._request_allow = boom  # type: ignore[method-assign]
-        Accounts.sync_referral_attribution(accounts, profile, None)
+        result = Accounts.sync_referral_attribution(accounts, profile, None)
+        assert result is False
 
     def test_attributes_via_the_waitlist_referral_code(self):
         accounts = FakeAccounts()
@@ -548,7 +552,10 @@ class TestSyncReferralAttribution:
 
         accounts._request = fake  # type: ignore[method-assign]
         accounts._request_allow = fake  # type: ignore[method-assign]
-        Accounts.sync_referral_attribution(accounts, profile, "referred@example.com")
+        result = Accounts.sync_referral_attribution(
+            accounts, profile, "referred@example.com"
+        )
+        assert result is True
 
         posts = [c for c in calls if c[0] == "POST" and c[1] == "/referrals"]
         assert posts == [
@@ -564,6 +571,73 @@ class TestSyncReferralAttribution:
         }
         patches = [c for c in calls if c[0] == "PATCH" and c[1] == "/profiles"]
         assert patches[0][2]["json"]["referred_by"] == "referrer-1"
+
+    def test_matches_the_waitlist_email_case_insensitively(self):
+        """The JWT's email is lowercase; the waitlist row keeps whatever case
+
+        the visitor originally typed (the unique index is on lower(email),
+        not the column itself), so an exact `eq` match would silently never
+        attribute a mixed-case signup.
+        """
+        accounts = FakeAccounts()
+        profile = _profile()
+        calls = []
+
+        class R:
+            def __init__(self, rows):
+                self.status_code = 200
+                self._rows = rows
+
+            def json(self):
+                return self._rows
+
+        def fake(method, path, ok_extra=(), **kwargs):
+            calls.append((method, path, kwargs))
+            if path == "/waitlist":
+                assert kwargs["params"]["email"] == "ilike.Jane@Example.com"
+                return R([{"referral_code": "REF12345"}])
+            if path == "/profiles" and method == "GET":
+                return R([{"id": "referrer-1"}])
+            return R([])
+
+        accounts._request = fake  # type: ignore[method-assign]
+        accounts._request_allow = fake  # type: ignore[method-assign]
+        result = Accounts.sync_referral_attribution(
+            accounts, profile, "Jane@Example.com"
+        )
+        assert result is True
+        waitlist_calls = [c for c in calls if c[1] == "/waitlist"]
+        assert len(waitlist_calls) == 1
+
+    def test_escapes_ilike_wildcards_in_the_email(self):
+        """A literal '*' in an (unusual but valid) email must not act as a
+
+        PostgREST ilike wildcard and match unrelated waitlist rows.
+        """
+        accounts = FakeAccounts()
+        profile = _profile()
+
+        class R:
+            def __init__(self, rows):
+                self.status_code = 200
+                self._rows = rows
+
+            def json(self):
+                return self._rows
+
+        captured = {}
+
+        def fake(method, path, ok_extra=(), **kwargs):
+            if path == "/waitlist":
+                captured["email_param"] = kwargs["params"]["email"]
+                return R([])
+            raise AssertionError(f"unexpected write: {method} {path}")
+
+        accounts._request = fake  # type: ignore[method-assign]
+        accounts._request_allow = fake  # type: ignore[method-assign]
+        Accounts.sync_referral_attribution(accounts, profile, "we*rd@example.com")
+
+        assert captured["email_param"] == "ilike.we\\*rd@example.com"
 
     def test_ignores_self_referral(self):
         accounts = FakeAccounts()
@@ -586,7 +660,10 @@ class TestSyncReferralAttribution:
 
         accounts._request = fake  # type: ignore[method-assign]
         accounts._request_allow = fake  # type: ignore[method-assign]
-        Accounts.sync_referral_attribution(accounts, profile, "referred@example.com")
+        result = Accounts.sync_referral_attribution(
+            accounts, profile, "referred@example.com"
+        )
+        assert result is False
 
     def test_no_waitlist_row_is_a_no_op(self):
         accounts = FakeAccounts()
@@ -607,13 +684,16 @@ class TestSyncReferralAttribution:
 
         accounts._request = fake  # type: ignore[method-assign]
         accounts._request_allow = fake  # type: ignore[method-assign]
-        Accounts.sync_referral_attribution(accounts, profile, "referred@example.com")
+        result = Accounts.sync_referral_attribution(
+            accounts, profile, "referred@example.com"
+        )
+        assert result is False
 
     def test_a_409_on_the_referral_insert_is_treated_as_already_attributed(self):
         """The referrals_referred_once unique index makes this idempotent —
 
         a concurrent /me call that already attributed the same profile must
-        not raise here.
+        not raise here, and still reports the profile as referred.
         """
         accounts = FakeAccounts()
         profile = _profile()
@@ -638,7 +718,10 @@ class TestSyncReferralAttribution:
 
         accounts._request = fake  # type: ignore[method-assign]
         accounts._request_allow = fake  # type: ignore[method-assign]
-        Accounts.sync_referral_attribution(accounts, profile, "referred@example.com")
+        result = Accounts.sync_referral_attribution(
+            accounts, profile, "referred@example.com"
+        )
+        assert result is True
 
     def test_a_store_failure_never_propagates(self):
         """Best-effort, same posture as record_usage: /me must keep working."""
