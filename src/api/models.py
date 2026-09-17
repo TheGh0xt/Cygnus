@@ -153,6 +153,11 @@ class AnalysisResult(BaseModel):
     # that actually matters — drivers, confidence, evidence.
     report: MarketAnalysisReport | None = None
     error: str | None = None
+    # Mirrors PmieError's `type` slug (ErrorType) for the async failure path,
+    # which had no typed contract before F15 — clients should switch on this,
+    # never on `error`'s prose, the same rule as the synchronous problem+json
+    # responses.
+    error_type: str | None = None
 
 
 def extract_slug(query: str, slug: str | None) -> str:

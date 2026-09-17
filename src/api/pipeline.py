@@ -7,11 +7,14 @@ does not break the UI contract.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
+from datetime import UTC, datetime
 
 from google.genai import types
 
+from .errors import ErrorType
 from .registry import AnalysisRegistry, StageEvent
 from .usage import TokenUsage, add_event_usage
 
@@ -26,9 +29,87 @@ STAGE_BY_AUTHOR = {
     "market_analyst_agent": "analysis",
 }
 
+# Authors whose raw tool output has_no_usable_market_data inspects. Retrieval
+# only — the analyst and news stages never touch Sagittarius.
+RETRIEVAL_AUTHORS = {"analysis_event_retrieval", "analysis_signal_retrieval"}
+
 
 def stage_for_author(author: str) -> str | None:
     return STAGE_BY_AUTHOR.get(author)
+
+
+class InsufficientMarketDataError(RuntimeError):
+    """Retrieval finished but left nothing to reason over (F15).
+
+    Raised instead of letting the pipeline continue into news retrieval and
+    the analyst. A schema-valid "I had no data" report is not an exception —
+    the analyst prompt's own UNKNOWN_ANOMALY/empty-market_id instructions
+    make sure of that — so without this, the run finishes with
+    outcome="completed" and silently spends a user's monthly credit on a
+    report that explains nothing.
+    """
+
+    error_type = ErrorType.SAGITTARIUS_UNAVAILABLE
+
+
+def _tool_result_payloads(event) -> list[dict]:
+    """Every JSON object inside one event's raw MCP tool results.
+
+    Reads get_function_responses(), not the retrieval agents' output_key
+    text: a model that ignores "return the tool result exactly as received"
+    would otherwise defeat this check the same way the analyst ignoring its
+    own prompt produced F15 in the first place.
+
+    Sagittarius wraps every tool result as TextContent —
+    {"content": [{"type": "text", "text": "<json>"}]}, never
+    structuredContent (internal/interface/mcp/tools/*.go in Sagittarius) — so
+    the payload is one json.loads away from the response dict, not sitting
+    at its top level.
+    """
+    get_responses = getattr(event, "get_function_responses", None)
+    if get_responses is None:
+        return []
+
+    payloads: list[dict] = []
+    for func_response in get_responses():
+        response = getattr(func_response, "response", None)
+        if not isinstance(response, dict):
+            continue
+        for item in response.get("content") or []:
+            text = item.get("text") if isinstance(item, dict) else None
+            if not text:
+                continue
+            try:
+                payloads.append(json.loads(text))
+            except (TypeError, ValueError):
+                continue
+    return payloads
+
+
+def has_no_usable_market_data(events: list) -> bool:
+    """Whether Sagittarius gave the retrieval stages nothing to reason over.
+
+    Two shapes, both mapped to ErrorType.SAGITTARIUS_UNAVAILABLE by the
+    caller: no market anywhere in retrieval output carries a condition_id
+    (Sagittarius unreachable or erroring), or every market that does carry
+    one reports probability 0.0 everywhere (a snapshot fetch that came back
+    empty rather than erroring).
+
+    Volume is deliberately excluded: a real, quiet market has a real
+    probability and zero volume, and that is a fact worth reporting, not an
+    outage. Gating on it would fix one fabrication by shipping another.
+    """
+    markets: list[dict] = []
+    for event in events:
+        for payload in _tool_result_payloads(event):
+            markets.extend(payload.get("markets") or [])
+
+    markets_with_id = [m for m in markets if isinstance(m, dict) and m.get("condition_id")]
+    if not markets_with_id:
+        return True
+
+    probabilities = [m["probability"] for m in markets_with_id if "probability" in m]
+    return bool(probabilities) and all(p == 0.0 for p in probabilities)
 
 
 def build_runner(db_path: str):
@@ -142,6 +223,7 @@ class AnalysisPipeline:
             message = types.Content(role="user", parts=[types.Part(text=query)])
             state: dict = {}
             usage = TokenUsage()
+            retrieval_events: list = []
 
             async for event in self._runner.run_async(
                 user_id=self._user_id,
@@ -157,10 +239,25 @@ class AnalysisPipeline:
                 state.update(_state_delta(event))
                 usage = add_event_usage(usage, event)
 
+                if getattr(event, "author", None) in RETRIEVAL_AUTHORS:
+                    retrieval_events.append(event)
+
                 if event.is_final_response() and stage:
                     self._registry.publish(
                         analysis_id, StageEvent("stage_completed", stage, {})
                     )
+                    # Checked right after retrieval, before news retrieval or
+                    # the analyst ever run: the entire pipeline is one nested
+                    # async generator, so stopping this consumer loop here
+                    # means those later stages are never started, not merely
+                    # discarded (F15). No quota spent, no report persisted.
+                    if stage == "signal_retrieval" and has_no_usable_market_data(
+                        retrieval_events
+                    ):
+                        raise InsufficientMarketDataError(
+                            "Sagittarius returned no usable market data for "
+                            "this event."
+                        )
 
             final = state.get(REPORT_KEY)
             if final is None:
@@ -169,6 +266,14 @@ class AnalysisPipeline:
                 final = await self._report_from_session(session.id)
             if final is None:
                 raise RuntimeError("pipeline produced no report")
+
+            # An LLM cannot know the current time (F16) — production saw a
+            # report stamped two years in the past. Set it here, once, so the
+            # registry, the persisted row, and the SSE `report` event all
+            # agree on the same correct value. This runs after the analyst's
+            # output_schema has already validated that *a* timestamp exists;
+            # only the value is being corrected.
+            final["timestamp"] = datetime.now(UTC).isoformat()
 
             for violation in _citation_coverage_violations(final, state.get(NEWS_KEY)):
                 logger.warning(
@@ -196,9 +301,22 @@ class AnalysisPipeline:
             self._registry.publish(analysis_id, StageEvent("report", None, final))
         except Exception as exc:
             logger.exception("analysis %s failed", analysis_id)
-            self._registry.mark_failed(analysis_id, str(exc))
+            error_type = getattr(exc, "error_type", None)
+            self._registry.mark_failed(
+                analysis_id,
+                str(exc),
+                error_type=error_type.value if error_type else None,
+            )
             self._registry.publish(
-                analysis_id, StageEvent("error", None, {"detail": str(exc)})
+                analysis_id,
+                StageEvent(
+                    "error",
+                    None,
+                    {
+                        "detail": str(exc),
+                        "error_type": error_type.value if error_type else None,
+                    },
+                ),
             )
         finally:
             # Always terminate the stream, success or failure, or an SSE

@@ -35,6 +35,10 @@ class AnalysisRecord:
     status: AnalysisStatus = AnalysisStatus.PENDING
     report: dict | None = None
     error: str | None = None
+    # A stable slug (see api.errors.ErrorType) a client can switch on, mirroring
+    # the synchronous PmieError path — plain None for a failure with no typed
+    # cause, so old clients reading only `error` see no behavior change.
+    error_type: str | None = None
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     # Who started this run. None for system-generated analyses (the
     # scheduled discovery cycle), which have no owner to check against.
@@ -70,10 +74,13 @@ class AnalysisRegistry:
         record.status = AnalysisStatus.COMPLETED
         record.report = report
 
-    def mark_failed(self, analysis_id: str, error: str) -> None:
+    def mark_failed(
+        self, analysis_id: str, error: str, error_type: str | None = None
+    ) -> None:
         record = self._records[analysis_id]
         record.status = AnalysisStatus.FAILED
         record.error = error
+        record.error_type = error_type
 
     def set_report_id(self, analysis_id: str, report_id: int) -> None:
         self._records[analysis_id].report_id = report_id
