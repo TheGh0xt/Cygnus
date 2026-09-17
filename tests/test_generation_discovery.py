@@ -250,6 +250,127 @@ class TestDiscoveryErrorUnwrapsExceptionGroups:
             await discovery.moving_markets()
 
 
+class TestHttpStatusErrorDetail:
+    """F5, part two: the unwrap named the type (HTTPStatusError) but threw
+    away everything that would say *who* returned the 429 — Sagittarius's own
+    handler never answers 429 (grep confirms; it only answers 401, 403, or
+    MCP), so the edge in front of it is the leading suspect. `cf-ray` present
+    with no Render origin header is what would confirm that without paying
+    for the upgrade first."""
+
+    @staticmethod
+    def _http_status_error(
+        status_code: int = 429, headers: dict[str, str] | None = None, text: str = ""
+    ):
+        import httpx
+
+        request = httpx.Request("POST", "https://sagittarius-rp3z.onrender.com/mcp")
+        response = httpx.Response(
+            status_code, headers=headers or {}, text=text, request=request
+        )
+        return httpx.HTTPStatusError(
+            f"{status_code} error", request=request, response=response
+        )
+
+    async def test_reports_status_and_cloudflare_headers_with_no_origin_header(
+        self, monkeypatch
+    ):
+        # The decisive signal: cf-ray present, x-render-origin-server absent.
+        error = self._http_status_error(
+            headers={
+                "retry-after": "5",
+                "cf-ray": "8f1a2b3c4d5e6f70-SJC",
+                "server": "cloudflare",
+            },
+            text="rate limited",
+        )
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(error),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError) as exc_info:
+            await discovery.moving_markets()
+
+        message = str(exc_info.value)
+        assert "429" in message
+        assert "retry-after=5" in message
+        assert "cf-ray=8f1a2b3c4d5e6f70-SJC" in message
+        assert "server=cloudflare" in message
+        assert "x-render-origin-server" not in message
+
+    async def test_reports_render_origin_header_when_present(self, monkeypatch):
+        # The counter-evidence: if Render's own header shows up, the request
+        # reached our container and the edge hypothesis is wrong.
+        error = self._http_status_error(headers={"x-render-origin-server": "gunicorn"})
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(error),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError, match="x-render-origin-server=gunicorn"):
+            await discovery.moving_markets()
+
+    async def test_body_snippet_is_included_and_capped(self, monkeypatch):
+        error = self._http_status_error(text="x" * 500)
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(error),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError) as exc_info:
+            await discovery.moving_markets()
+
+        message = str(exc_info.value)
+        assert "x" * 200 in message
+        assert "x" * 201 not in message
+
+    async def test_message_stays_single_line_with_no_embedded_quotes(self, monkeypatch):
+        # The workflow greps discovery_error with a sed pattern that stops at
+        # the first literal '"' and assumes one line — a body snippet or
+        # header value must not smuggle either in and break that capture.
+        error = self._http_status_error(
+            headers={"server": 'cloud"flare'}, text='{"error":\n"too many requests"}'
+        )
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(error),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError) as exc_info:
+            await discovery.moving_markets()
+
+        message = str(exc_info.value)
+        assert '"' not in message
+        assert "\n" not in message
+
+    async def test_non_http_status_error_is_unaffected(self, monkeypatch):
+        # Scope check: a plain timeout must not gain the new suffix at all.
+        monkeypatch.setattr(
+            discovery_module,
+            "mcp_http_client",
+            lambda headers: _RaisingAsyncCM(TimeoutError("timed out")),
+        )
+
+        discovery = SagittariusDiscovery("http://localhost:8080/mcp")
+        with pytest.raises(DiscoveryError) as exc_info:
+            await discovery.moving_markets()
+
+        message = str(exc_info.value)
+        assert message == (
+            "could not reach Sagittarius at http://localhost:8080/mcp: "
+            "TimeoutError: timed out"
+        )
+
+
 class TestAuth:
     """B.3, client side: this is the third of Cygnus's three MCP clients to
     Sagittarius — the ADK agent toolsets and the evaluation worker's own
