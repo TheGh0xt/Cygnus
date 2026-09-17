@@ -15,12 +15,20 @@ from __future__ import annotations
 import json
 import logging
 
+import httpx
+
 from ..config import mcp_auth_headers, mcp_http_client
 from .selector import Candidate
 
 logger = logging.getLogger("cygnus.generation.discovery")
 
 _TOOL = "get_moving_markets"
+
+# Headers that tell an HTTP 429 apart from an app-level one: cf-ray present
+# with no Render origin header means Cloudflare answered and the request
+# never reached our container (F5) — the other two are corroborating.
+_DIAGNOSTIC_HEADERS = ("retry-after", "cf-ray", "server", "x-render-origin-server")
+_BODY_SNIPPET_LIMIT = 200
 
 
 class DiscoveryError(Exception):
@@ -40,6 +48,49 @@ def _unwrap_exception_group(exc: BaseException) -> BaseException:
     while isinstance(exc, ExceptionGroup) and exc.exceptions:
         exc = exc.exceptions[0]
     return exc
+
+
+def _sanitize(value: str) -> str:
+    """Strip characters that would break the workflow's discovery_error sed.
+
+    The capture is `[^"]*` and assumes one line — a `"` in a header value or
+    response body would truncate it early, and a newline would smuggle a
+    second line into a log statement that assumes one.
+    """
+    return value.replace('"', "'").replace("\n", " ").replace("\r", " ")
+
+
+def _http_status_detail(real: BaseException) -> str:
+    """Evidence an httpx.HTTPStatusError carries that str(exc) discards.
+
+    None of status, retry-after, cf-ray, server, or the render origin header
+    survive str(exc) — without them a 429 from Cloudflare's edge and a 429
+    from Sagittarius itself (which its /mcp handler never actually sends) are
+    indistinguishable in the log (F5).
+    """
+    if not isinstance(real, httpx.HTTPStatusError):
+        return ""
+
+    response = real.response
+    parts = [f"status={response.status_code}"]
+    for name in _DIAGNOSTIC_HEADERS:
+        value = response.headers.get(name)
+        if value:
+            parts.append(f"{name}={_sanitize(value)}")
+
+    try:
+        body = _sanitize(response.text[:_BODY_SNIPPET_LIMIT])
+    except httpx.ResponseNotRead:
+        # The body may not be readable (e.g. an unread stream) — the headers
+        # above already carry the decisive signal.
+        body = ""
+    if body:
+        # Not repr(): if the sanitized body still contains a "'" (originally
+        # a '"'), repr() would switch to double quotes to avoid escaping it,
+        # reintroducing the character _sanitize just removed.
+        parts.append(f"body='{body}'")
+
+    return " [" + ", ".join(parts) + "]"
 
 
 def _count_leaves(exc: BaseException) -> int:
@@ -199,9 +250,10 @@ class SagittariusDiscovery:
             # the wrapper text this replaces.
             remaining = _count_leaves(exc) - 1
             suffix = f" (+{remaining} more)" if remaining > 0 else ""
+            detail = _http_status_detail(real)
             raise DiscoveryError(
                 f"could not reach Sagittarius at {self.mcp_url}: "
-                f"{type(real).__name__}: {real}{suffix}"
+                f"{type(real).__name__}: {real}{suffix}{detail}"
             ) from exc
 
         return parse_moving_markets(result)
