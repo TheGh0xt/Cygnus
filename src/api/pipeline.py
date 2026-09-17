@@ -81,7 +81,7 @@ def _tool_result_payloads(event) -> list[dict]:
                 continue
             try:
                 payloads.append(json.loads(text))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
     return payloads
 
@@ -104,7 +104,9 @@ def has_no_usable_market_data(events: list) -> bool:
         for payload in _tool_result_payloads(event):
             markets.extend(payload.get("markets") or [])
 
-    markets_with_id = [m for m in markets if isinstance(m, dict) and m.get("condition_id")]
+    markets_with_id = [
+        m for m in markets if isinstance(m, dict) and m.get("condition_id")
+    ]
     if not markets_with_id:
         return True
 
@@ -255,8 +257,7 @@ class AnalysisPipeline:
                         retrieval_events
                     ):
                         raise InsufficientMarketDataError(
-                            "Sagittarius returned no usable market data for "
-                            "this event."
+                            "Sagittarius returned no usable market data for this event."
                         )
 
             final = state.get(REPORT_KEY)

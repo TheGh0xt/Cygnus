@@ -36,7 +36,9 @@ def test_failure_records_reason():
 def test_failure_records_optional_typed_error():
     reg = AnalysisRegistry()
     rec = reg.create("q")
-    reg.mark_failed(rec.analysis_id, "sagittarius down", error_type="sagittarius-unavailable")
+    reg.mark_failed(
+        rec.analysis_id, "sagittarius down", error_type="sagittarius-unavailable"
+    )
     got = reg.get(rec.analysis_id)
     assert got.error_type == "sagittarius-unavailable"
 

@@ -237,15 +237,19 @@ class TestHasNoUsableMarketData:
     def test_true_when_no_tool_payloads_reported(self):
         # Sagittarius unreachable: the retrieval agent's own text may say
         # "no data found", but there is no tool JSON to even parse.
-        assert has_no_usable_market_data([FakeEvent("analysis_event_retrieval")]) is True
+        assert (
+            has_no_usable_market_data([FakeEvent("analysis_event_retrieval")]) is True
+        )
 
     def test_true_when_condition_id_present_but_every_probability_is_zero(self):
         events = [
             _event_with_markets(
-                "analysis_event_retrieval", [{"condition_id": "0xabc", "probability": 0.0}]
+                "analysis_event_retrieval",
+                [{"condition_id": "0xabc", "probability": 0.0}],
             ),
             _event_with_markets(
-                "analysis_signal_retrieval", [{"condition_id": "0xabc", "probability": 0.0}]
+                "analysis_signal_retrieval",
+                [{"condition_id": "0xabc", "probability": 0.0}],
             ),
         ]
         assert has_no_usable_market_data(events) is True
@@ -253,7 +257,8 @@ class TestHasNoUsableMarketData:
     def test_false_when_a_market_has_a_real_nonzero_probability(self):
         events = [
             _event_with_markets(
-                "analysis_event_retrieval", [{"condition_id": "0xabc", "probability": 0.42}]
+                "analysis_event_retrieval",
+                [{"condition_id": "0xabc", "probability": 0.42}],
             )
         ]
         assert has_no_usable_market_data(events) is False
@@ -330,7 +335,9 @@ async def test_pipeline_fails_fast_on_total_market_data_failure_without_billing(
     record = registry.create("why did it move?", profile_id="user-1")
     accounts = _FakeAccounts()
     pipeline = AnalysisPipeline(registry, NoDataRunner(), accounts=accounts)
-    await pipeline.run(record.analysis_id, "why did it move?", "some-slug", profile_id="user-1")
+    await pipeline.run(
+        record.analysis_id, "why did it move?", "some-slug", profile_id="user-1"
+    )
 
     result = registry.get(record.analysis_id)
     assert result.status is AnalysisStatus.FAILED
@@ -340,11 +347,16 @@ async def test_pipeline_fails_fast_on_total_market_data_failure_without_billing(
     events = []
     while not record.queue.empty():
         events.append(record.queue.get_nowait())
-    stage_starts = {e.stage for e in events if e is not None and e.event == "stage_started"}
+    stage_starts = {
+        e.stage for e in events if e is not None and e.event == "stage_started"
+    }
     assert "news_retrieval" not in stage_starts
     assert "analysis" not in stage_starts
     error_events = [e for e in events if e is not None and e.event == "error"]
-    assert error_events and error_events[0].data.get("error_type") == "sagittarius-unavailable"
+    assert (
+        error_events
+        and error_events[0].data.get("error_type") == "sagittarius-unavailable"
+    )
 
     # F15's actual bug: an "I had no data" report was outcome="completed",
     # which monthly_usage counts. Pin the fix as a property of outcome
@@ -372,7 +384,10 @@ async def test_pipeline_completes_normally_for_a_real_quiet_market():
             yield FakeEvent("analysis_news_retrieval", final=True)
             yield FakeEvent(
                 "market_analyst_agent",
-                report={"market_id": "0xabc", "primary_causal_driver": "UNKNOWN_ANOMALY"},
+                report={
+                    "market_id": "0xabc",
+                    "primary_causal_driver": "UNKNOWN_ANOMALY",
+                },
             )
 
     registry = AnalysisRegistry()
