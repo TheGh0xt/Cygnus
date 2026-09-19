@@ -30,6 +30,17 @@ def test_failure_records_reason():
     got = reg.get(rec.analysis_id)
     assert got.status is AnalysisStatus.FAILED
     assert got.error == "sagittarius down"
+    assert got.error_type is None
+
+
+def test_failure_records_optional_typed_error():
+    reg = AnalysisRegistry()
+    rec = reg.create("q")
+    reg.mark_failed(
+        rec.analysis_id, "sagittarius down", error_type="sagittarius-unavailable"
+    )
+    got = reg.get(rec.analysis_id)
+    assert got.error_type == "sagittarius-unavailable"
 
 
 def test_get_unknown_id_returns_none():

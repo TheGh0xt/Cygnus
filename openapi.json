@@ -67,6 +67,17 @@
             ],
             "title": "Error"
           },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
+          },
           "report": {
             "anyOf": [
               {

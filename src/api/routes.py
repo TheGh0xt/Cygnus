@@ -256,6 +256,7 @@ async def get_analysis(
         status=record.status.value,
         report=record.report,
         error=record.error,
+        error_type=record.error_type,
     )
 
 
