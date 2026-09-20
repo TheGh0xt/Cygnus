@@ -43,6 +43,41 @@ def test_every_streamable_http_client_call_is_wired_for_auth():
     )
 
 
+def test_every_sagittarius_client_defaults_to_the_configured_token(monkeypatch):
+    """Constructing a client with only a URL must still carry auth.
+
+    The static guard above passes `http_client=` and stops there — it says so
+    itself. That was not enough: `SagittariusPriceFetcher` defaulted its
+    headers to `{}`, `mcp_http_client({})` yields None, and the SDK then
+    builds its own unauthenticated client. The `http_client=` argument was
+    present the whole time, so the guard was green while
+    `api/app.py`'s fetcher — the one the running API process uses — sent no
+    token at all, and every stored report lost its observed price.
+
+    This asserts the behaviour the guard only approximates, across every
+    Sagittarius MCP client, so a fourth one cannot repeat it.
+    """
+    from src.evaluation.worker import SagittariusPriceFetcher
+    from src.generation.discovery import SagittariusDiscovery
+
+    monkeypatch.setenv("MCP_BEARER_TOKEN", "secret-token")
+    expected = {"Authorization": "Bearer secret-token"}
+
+    clients = [
+        SagittariusPriceFetcher("http://localhost:8080/mcp"),
+        SagittariusDiscovery("http://localhost:8080/mcp"),
+    ]
+
+    unauthenticated = [
+        type(client).__name__ for client in clients if client._headers != expected
+    ]
+    assert unauthenticated == [], (
+        "these Sagittarius MCP clients drop the bearer token when constructed "
+        "with only a URL, which is how api/app.py constructs them: "
+        + ", ".join(unauthenticated)
+    )
+
+
 def test_the_guard_actually_finds_something_when_it_should():
     # Proves the regex isn't vacuously matching nothing. If src/ ever stops
     # calling streamable_http_client directly (e.g. everything moves onto
