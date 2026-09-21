@@ -253,7 +253,26 @@ class SagittariusPriceFetcher:
         # B.3: the same bearer token Sagittarius enforces on /mcp. This is
         # the worker's own MCP client — separate from the agents' toolsets
         # in ../config.py — so it needs the header wired in independently.
-        self._headers = headers or {}
+        #
+        # Reads the env var itself when given nothing, matching
+        # SagittariusDiscovery.__init__. It previously defaulted to `{}`, and
+        # api/app.py — the construction site the *running API process* uses —
+        # passed no headers, so every price fetch went out unauthenticated.
+        # Once Sagittarius turned B.3 enforcement on, they all 401'd,
+        # ReportPersistence swallowed it, and every report was stored with
+        # price=None: permanently unscoreable, because the price observed at
+        # report time cannot be reconstructed afterwards.
+        #
+        # An explicit `{}` still means "send nothing" — only None defers to
+        # the environment — so a caller can still opt out deliberately.
+        if headers is None:
+            # Imported here, not at module scope: ../config.py pulls in
+            # google.adk, and this module has to stay importable by the CLI
+            # worker without it. main() defers it for the same reason.
+            from ..config import mcp_auth_headers
+
+            headers = mcp_auth_headers()
+        self._headers = headers
 
     def current_probability(self, market_slug: str) -> float | None:
         import asyncio

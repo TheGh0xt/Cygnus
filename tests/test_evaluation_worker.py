@@ -242,8 +242,33 @@ class TestSagittariusPriceFetcherAuth:
     this covers only what's specific to this fetcher — storing what it was
     given."""
 
-    def test_defaults_to_no_headers(self):
+    def test_reads_the_bearer_token_from_the_environment_by_default(self, monkeypatch):
+        """The default must carry auth, not drop it.
+
+        This previously asserted `== {}` — it pinned the bug as correct.
+        api/app.py constructs this fetcher with no headers, so once
+        Sagittarius enforced B.3 every price fetch 401'd and every report was
+        stored with price=None, which cannot be repaired later.
+        """
+        monkeypatch.setenv("MCP_BEARER_TOKEN", "secret-token")
+
         fetcher = SagittariusPriceFetcher("http://localhost:8080/mcp")
+
+        assert fetcher._headers == {"Authorization": "Bearer secret-token"}
+
+    def test_sends_nothing_when_no_token_is_configured(self, monkeypatch):
+        monkeypatch.delenv("MCP_BEARER_TOKEN", raising=False)
+
+        fetcher = SagittariusPriceFetcher("http://localhost:8080/mcp")
+
+        assert fetcher._headers == {}
+
+    def test_an_explicit_empty_dict_still_means_send_nothing(self, monkeypatch):
+        """Only None defers to the environment, so opting out stays possible."""
+        monkeypatch.setenv("MCP_BEARER_TOKEN", "secret-token")
+
+        fetcher = SagittariusPriceFetcher("http://localhost:8080/mcp", headers={})
+
         assert fetcher._headers == {}
 
     def test_stores_the_given_headers(self):
