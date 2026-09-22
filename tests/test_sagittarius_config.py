@@ -103,11 +103,13 @@ class TestMcpHttpClient:
     `async with`. Everything below exercises it that way.
     """
 
-    async def test_no_client_when_headers_empty(self):
-        # The mcp SDK builds its own default client in this case, matching
-        # behaviour from before B.3 exactly.
+    async def test_still_builds_a_client_when_there_are_no_headers(self):
+        # This used to yield None and let the SDK build its own default, which
+        # also meant inheriting the SDK's 30s timeout. "No bearer token
+        # configured" then silently also meant "cannot survive a cold start".
+        # The timeout matters whether or not auth does.
         async with mcp_http_client({}) as client:
-            assert client is None
+            assert client is not None
 
     async def test_client_carries_the_bearer_header(self):
         async with mcp_http_client({"Authorization": "Bearer secret-token"}) as client:
@@ -120,31 +122,57 @@ class TestMcpHttpClient:
             assert client is not None
             assert client.headers["authorization"] == "Bearer secret-token"
 
-    async def test_defaults_to_none_when_unset(self):
+    async def test_sends_no_auth_header_when_unset(self, monkeypatch):
+        monkeypatch.delenv("MCP_BEARER_TOKEN", raising=False)
         async with mcp_http_client() as client:
-            assert client is None
+            assert client is not None
+            assert "authorization" not in client.headers
 
-    async def test_uses_mcp_timeouts_not_httpxs_5s_default(self):
-        # The actual bug this guards: a bare httpx.AsyncClient(headers=...)
-        # gets httpx's 5s default and no redirects. Sagittarius takes ~50s to
-        # wake on the free plan, so every call would time out once
-        # MCP_BEARER_TOKEN is set in production.
-        #
-        # Compared against a fresh create_mcp_http_client() rather than
-        # hardcoded numbers: the whole point of building on that function is
-        # that our client tracks whatever the mcp SDK's own default is, on
-        # whatever SDK version is actually installed. Pinning literal values
-        # here would just reintroduce the same kind of drift this guards
-        # against, one version bump away.
+    async def test_outlives_a_free_plan_cold_start(self, monkeypatch):
+        """The connect budget must clear Sagittarius waking up, not merely
+        beat httpx's 5s default.
+
+        The previous version of this test compared against a fresh
+        create_mcp_http_client() and asserted equality — which pinned the SDK's
+        MCP_DEFAULT_TIMEOUT of **30s**, while its own comment said Sagittarius
+        "takes ~50s to wake on the free plan". The reasoning was right and the
+        assertion contradicted it.
+
+        What that cost, on 2026-09-22: the scheduled evaluation cron failed
+        with price_unavailable=1 after a 33-second run — 30s of connect timeout
+        plus overhead — against a market that was open and priced throughout.
+        The same ceiling sits under the personalised feed.
+
+        So this now asserts against SAGITTARIUS_TIMEOUT_SECONDS, the setting
+        render.yaml already carries for exactly this reason, rather than
+        against whatever the SDK happens to default to.
+        """
+        from mcp.shared._httpx_utils import MCP_DEFAULT_TIMEOUT
+
+        monkeypatch.setenv("SAGITTARIUS_TIMEOUT_SECONDS", "90")
+
+        async with mcp_http_client({"Authorization": "Bearer t"}) as client:
+            assert client.timeout.connect == 90.0
+            assert client.timeout.connect > MCP_DEFAULT_TIMEOUT
+            # A cold start is ~50s; anything at or under that is a coin flip.
+            assert client.timeout.connect > 50.0
+            # Streaming still gets its own, much longer budget — the read
+            # timeout bounds the gap between chunks, not the whole call.
+            assert client.timeout.read == 300.0
+
+    async def test_the_timeout_applies_without_a_token_too(self, monkeypatch):
+        monkeypatch.delenv("MCP_BEARER_TOKEN", raising=False)
+        monkeypatch.setenv("SAGITTARIUS_TIMEOUT_SECONDS", "90")
+
+        async with mcp_http_client() as client:
+            assert client.timeout.connect == 90.0
+
+    async def test_follows_redirects_like_the_sdk_default(self):
         from mcp.shared._httpx_utils import create_mcp_http_client
 
         async with create_mcp_http_client() as reference:
-            async with mcp_http_client(
-                {"Authorization": "Bearer secret-token"}
-            ) as client:
-                assert client.timeout == reference.timeout
+            async with mcp_http_client({"Authorization": "Bearer t"}) as client:
                 assert client.follow_redirects == reference.follow_redirects
-                assert reference.timeout.connect != 5.0  # sanity: not httpx's default
 
     async def test_closes_the_client_it_created(self):
         # streamable_http_client only closes a client it built itself; one
@@ -157,11 +185,13 @@ class TestMcpHttpClient:
             assert client.is_closed is False
         assert client.is_closed is True
 
-    async def test_no_client_to_close_when_headers_empty(self):
-        # Nothing was created, so nothing should be closed — and entering an
-        # empty async-with body must not raise.
+    async def test_closes_the_client_even_with_no_headers(self):
+        # A client is now always created — including when there is no bearer
+        # token — so it must always be closed too. This previously yielded
+        # None and had nothing to clean up.
         async with mcp_http_client({}) as client:
-            assert client is None
+            assert client is not None
+        assert client.is_closed
 
 
 class TestWarmUp:

@@ -40,6 +40,12 @@ _DEFAULT_URL = "http://localhost:8080/mcp"
 # report — which is far worse for a product whose whole claim is evidence.
 _DEFAULT_TIMEOUT_SECONDS = 90.0
 
+# Streamed responses need their own, much longer budget: the read timeout
+# bounds the gap between chunks, not the total call. Matches the mcp SDK's
+# MCP_DEFAULT_SSE_READ_TIMEOUT, which is the value being replaced for
+# connect/general operations only — that one was never the problem.
+_MCP_SSE_READ_TIMEOUT = 300.0
+
 
 def sagittarius_url() -> str:
     return os.getenv("SAGITTARIUS_MCP_URL", _DEFAULT_URL)
@@ -86,7 +92,7 @@ def sagittarius_connection_params() -> StreamableHTTPConnectionParams:
 @asynccontextmanager
 async def mcp_http_client(headers: dict[str, str] | None = None):
     """The httpx.AsyncClient to hand a raw `streamable_http_client(..., http_client=...)`
-    call, or None — as an async context manager, entered with `async with`.
+    call — as an async context manager, entered with `async with`.
 
     ADK's own StreamableHTTPConnectionParams takes `headers` directly (see
     sagittarius_connection_params above); the plain `mcp` SDK function used by
@@ -100,13 +106,24 @@ async def mcp_http_client(headers: dict[str, str] | None = None):
     Two things this has to get right that a bare httpx.AsyncClient(headers=...)
     doesn't:
 
-    - Timeouts. streamable_http_client's own default client is built via
-      create_mcp_http_client(), which sets a 30s connect and a 300s read
-      timeout plus follow_redirects=True. httpx's own default is a flat 5s
-      and no redirects — fine for nothing here, and fatal against a
-      Sagittarius that takes ~50s to wake from a free-plan sleep. Built with
-      the same create_mcp_http_client() the SDK uses for its own default, so
-      the two stay in lockstep as the SDK's defaults evolve.
+    - Timeouts. The SDK's own default is MCP_DEFAULT_TIMEOUT = 30s for general
+      operations (connect included) with a 300s SSE read. That is better than
+      httpx's flat 5s, but **still below the ~50s a free-plan Sagittarius takes
+      to wake**, which this docstring previously named as the hazard and then
+      failed to clear.
+
+      What that cost: the scheduled evaluation cron failed on 2026-09-22 with
+      `{"evaluated":0,"reports_due":1,"price_unavailable":1,"degraded":true}`,
+      after a 33-second run — 30s of connect timeout plus overhead, against a
+      market that was open and priced the whole time (verified against Gamma).
+      The same ceiling sits under SagittariusDiscovery, so a cold Sagittarius
+      also turns the personalised feed into 503 sagittarius-unavailable.
+
+      So the timeout is now sagittarius_timeout() — the same
+      SAGITTARIUS_TIMEOUT_SECONDS (90s on Render) that render.yaml already
+      sets *for exactly this reason*, and that previously reached only ADK's
+      toolset path via sagittarius_connection_params(). Two of the three MCP
+      client paths were ignoring the setting meant to cover them.
     - Lifecycle. streamable_http_client only closes a client it created
       itself ("Only manage client lifecycle if we created it" — a client
       passed in via http_client= is the caller's to close. A plain function
@@ -115,15 +132,16 @@ async def mcp_http_client(headers: dict[str, str] | None = None):
       caller's `async with mcp_http_client(...) as http_client:` guarantees
       it's closed on the way out.
 
-    Yields None (not an empty-headers client) when there's nothing to add:
-    the mcp SDK then builds and manages its own default client, matching
-    behaviour from before B.3 exactly.
+    Always yields a client, never None. It used to yield None when there were
+    no headers to add, letting the SDK build its own default — but that default
+    is the 30s one, so "no bearer token configured" silently also meant "cannot
+    survive a cold start". The timeout matters whether or not auth does.
     """
     resolved = headers if headers is not None else mcp_auth_headers()
-    if not resolved:
-        yield None
-        return
-    async with create_mcp_http_client(headers=resolved) as client:
+    timeout = httpx.Timeout(sagittarius_timeout(), read=_MCP_SSE_READ_TIMEOUT)
+    async with create_mcp_http_client(
+        headers=resolved or None, timeout=timeout
+    ) as client:
         yield client
 
 
